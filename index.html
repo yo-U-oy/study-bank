@@ -324,6 +324,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @keyframes slideok{0%{box-shadow:0 0 0 rgba(240,211,142,0)}40%{box-shadow:0 0 40px rgba(240,211,142,.8)}100%{box-shadow:0 0 0 rgba(240,211,142,0)}}
 @keyframes shine{from{background-position:100% 0}to{background-position:0 0}}
 .cheer .ctier.tA{color:var(--brass-hi);text-shadow:0 0 18px rgba(240,211,142,.6)}
+/* 英文界面：字距收紧；特别任务一行放不下时，按钮换到下一行 */
+html[lang="en"] h1,html[lang="en"] h2,html[lang="en"] h3{letter-spacing:.02em}
+html[lang="en"] .altar h1{letter-spacing:.08em}
+html[lang="en"] nav.tabs button,html[lang="en"] .who,html[lang="en"] .bank .label,html[lang="en"] .overlay .task{letter-spacing:.04em}
+html[lang="en"] .prize .grade,html[lang="en"] .crit,html[lang="en"] .cheer .ctier{letter-spacing:.06em}
+.spitem{flex-wrap:wrap}
+.spitem>.grow{flex:1 1 60%;min-width:0}
 </style>
 </head>
 <body>
@@ -337,6 +344,16 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 </div>
 <div id="layer"></div>
 <div id="toasts" aria-live="polite"></div>
+<script src="i18n-en.js"></script>
+<script src="i18n.js"></script>
+<script>
+// 静态文字按界面语言替换（页面骨架里的几处中文）
+(function () {
+  const bm = document.getElementById('bootmsg'); if (bm) bm.textContent = tt(bm.textContent);
+  document.querySelectorAll('#main h1, #tabs button').forEach(el => { const n = el.lastChild; if (n && n.nodeType === 3) n.textContent = tt(n.textContent); });
+  if (window.LANG === 'en') document.title = 'Study Gacha Bank';
+})();
+</script>
 <script src="logic.js"></script>
 <script src="voices.js"></script>
 <script src="app.js"></script>
@@ -346,7 +363,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   let shown = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController || shown) return; shown = true;
-    const msg = '新版本已经下载好了（现在是 ' + (window.APP_VERSION || '旧版') + '）。 <button class="btn sm" style="margin-left:8px" onclick="location.reload()">立即更新</button>';
+    const msg = tt('新版本已经下载好了（现在是 ') + (window.APP_VERSION || tt('旧版')) + tt('）。') + ' <button class="btn sm" style="margin-left:8px" onclick="location.reload()">' + tt('立即更新') + '</button>';
     if (window.appToast) window.appToast(msg, 20000);
   });
   navigator.serviceWorker.register('sw.js').then(r => r.update()).catch(() => {});

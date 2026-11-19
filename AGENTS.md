@@ -10,7 +10,7 @@
 **设计原则（改功能时必须遵守）**
 - 以奖励为主。已经拿到的奖励不会过期，不做连续打卡、排行榜，不出现责备性的文字。
 - 唯一的"扣分"是游戏超时会记成欠账（作者自己要求的），之后的奖励先还账。
-- 界面文字用简体中文，语气温和、直接。**不要使用任何 emoji。**
+- 界面有简体中文和英文两种（1.9.0 起），语气温和、直接。**不要使用任何 emoji。**
 - 作者是编程新手。向作者解释时用日常语言，少用术语；需要作者操作时给出一步一步的说明。
 
 ## 2. 技术栈
@@ -24,6 +24,8 @@
 | `logic.js` | 纯规则：结算奖励、抽奖、跨日跨周、旧数据升级（`migrate`）。**不碰界面、不碰存储**，可以在 Node 里直接测试 |
 | `app.js` | 界面渲染、按钮事件（`ACT` 对象）、计时器、撤销、统计、闹铃、存储读写、备份导入导出 |
 | `voices.js` | 11 位同伴的台词（`window.VOICES`） |
+| `i18n.js` | 界面语言：`tt('中文')` 在英文模式下把中文片段换成英文；`ttLabel()` 只在提示里翻译流水标签；语言存在 localStorage 的 `bank-lang` |
+| `i18n-en.js` | 英文词典 `window.I18N_EN`，键是中文片段（去掉首尾空格），值是英文 |
 | `sw.js` | Service Worker：离线缓存与更新 |
 | `manifest.webmanifest`、`icons/` | PWA（添加到主屏幕）用的名称和图标 |
 | `sprites/c1..c11.png` | 同伴立绘，顺序与 `voices.js` 一致 |
@@ -32,13 +34,21 @@
 
 同一份 `app.js` 在两个地方运行：
 
-1. **Claude 版**：作为 Claude artifact 发布（slug `e395d7a6-f249-4970-bdf7-9e060d4ba4c0`）。通过 `window.claude.use('db')` 使用云端数据库，路径 `data/users/<uid>/state` 和 `.../state/logs/<YYYY-MM-DD>`。作者目前日常用这个版本。
-2. **独立版**：GitHub Pages，`https://yo-u-oy.github.io/study-bank/`。没有 `window.claude` 时自动改用 `localStorage`（键：`bank-local-state`、`bank-local-logs`）。数据只在这台设备的浏览器里。
+1. **Claude 版（已停止更新，停在 1.8.0）**：作为 Claude artifact 发布（slug `e395d7a6-f249-4970-bdf7-9e060d4ba4c0`）。通过 `window.claude.use('db')` 使用云端数据库，路径 `data/users/<uid>/state` 和 `.../state/logs/<YYYY-MM-DD>`。作者已经搬到独立版，**不要再把新版本发布到这个 artifact**，那里的旧数据保持原样。
+2. **独立版（作者日常使用）**：GitHub Pages，`https://yo-u-oy.github.io/study-bank/`。没有 `window.claude` 时自动改用 `localStorage`（键：`bank-local-state`、`bank-local-logs`）。数据只在这台设备的浏览器里。
 
 3. **同步到 GitHub（只在独立版，1.7.0 起）**：设置里填入作者自己的私有仓库和钥匙（fine-grained token，只给那一个仓库的 Contents 读写权限）后，记账约 30 秒后把 `{app, v, exported, state, logs}`（与导出备份同格式）上传为仓库里的 `data.json`，每次上传是一个提交。配置存在 localStorage 的 `bank-gh-sync`，不进 state、不进备份。AI 需要看独立版的流水时，读那个私有仓库的 `data.json`。目前只上传，不从仓库下载。
 
 `app.js` 里用变量 `cloud` 区分两者。界面文字要对两种情况都成立。
 Claude 版的 `index.html` 没有 PWA 部分，其余与独立版相同。
+
+## 3.5 界面文字与翻译（1.9.0 起）
+
+- 新加的界面文字一律写成 `tt('中文')`，并在 `i18n-en.js` 里补上英文。检查漏翻：在页面里设 `window.I18N_MISSING = new Set()`，切到英文点一遍，看里面收集到的片段。
+- **不要翻译数据**：写进流水的标签（`logAppend` 的 `label`、`logic.js` 的 `give()`）、计时记录的名字、用户自己起的任务名，一律保持原样，不包 `tt()`。流水页显示原文；提示气泡里用 `ttLabel()` 翻译。
+- 句子里夹数字时，英文语序不同就用占位符：`tt('第 # 项').replace('#', n)`。
+- `app.js` 里已有局部变量叫 `t` 和 `T`，所以翻译函数叫 `tt`。
+- 切换语言会重新加载页面（`setLang`）。
 
 ## 4. 发布新版本（每次都要做，不能漏）
 

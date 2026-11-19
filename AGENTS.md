@@ -35,6 +35,8 @@
 1. **Claude 版**：作为 Claude artifact 发布（slug `e395d7a6-f249-4970-bdf7-9e060d4ba4c0`）。通过 `window.claude.use('db')` 使用云端数据库，路径 `data/users/<uid>/state` 和 `.../state/logs/<YYYY-MM-DD>`。作者目前日常用这个版本。
 2. **独立版**：GitHub Pages，`https://yo-u-oy.github.io/study-bank/`。没有 `window.claude` 时自动改用 `localStorage`（键：`bank-local-state`、`bank-local-logs`）。数据只在这台设备的浏览器里。
 
+3. **同步到 GitHub（只在独立版，1.7.0 起）**：设置里填入作者自己的私有仓库和钥匙（fine-grained token，只给那一个仓库的 Contents 读写权限）后，记账约 30 秒后把 `{app, v, exported, state, logs}`（与导出备份同格式）上传为仓库里的 `data.json`，每次上传是一个提交。配置存在 localStorage 的 `bank-gh-sync`，不进 state、不进备份。AI 需要看独立版的流水时，读那个私有仓库的 `data.json`。目前只上传，不从仓库下载。
+
 `app.js` 里用变量 `cloud` 区分两者。界面文字要对两种情况都成立。
 Claude 版的 `index.html` 没有 PWA 部分，其余与独立版相同。
 

@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.6.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.7.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -86,7 +86,7 @@
 
   /* ---------- 保存 ---------- */
   function save() {
-    if (!cloud) { try { localStorage.setItem('bank-local-state', JSON.stringify(S)); } catch (e) { } return; }
+    if (!cloud) { try { localStorage.setItem('bank-local-state', JSON.stringify(S)); } catch (e) { } ghSchedule(); return; }
     if (!confirmed) return;
     dirty = true; if (!inflight) flush();
   }
@@ -112,8 +112,97 @@
   }
   async function writeLog(k) {
     if (cloud) await logRef(k).set(clone(logCache[k]));
-    else { const all = localLogs(); all[k] = logCache[k]; try { localStorage.setItem('bank-local-logs', JSON.stringify(all)); } catch (e) { } }
+    else { const all = localLogs(); all[k] = logCache[k]; try { localStorage.setItem('bank-local-logs', JSON.stringify(all)); } catch (e) { } ghSchedule(); }
   }
+  /* ---------- 同步到 GitHub（只在独立版）：把数据存一份到作者自己的私有仓库，方便备份和让 AI 读取 ---------- */
+  // 设置存在 localStorage 的 bank-gh-sync 里（不放进 state，所以不会进导出的备份）
+  const GH_KEY = 'bank-gh-sync', GH_FILE = 'data.json';
+  let ghTimer = null, ghBusy = false, ghAgain = false, ghSha = undefined, ghLast = null;
+  function ghCfg() { try { return JSON.parse(localStorage.getItem(GH_KEY)) || null; } catch (e) { return null; } }
+  function ghSetCfg(c) { try { if (c) localStorage.setItem(GH_KEY, JSON.stringify(c)); else localStorage.removeItem(GH_KEY); } catch (e) { } }
+  function ghNote(patch) { const c = ghCfg(); if (!c) return; ghSetCfg(Object.assign(c, patch)); if (view === 'settings' && !modal) renderMain(); }
+  function ghSchedule(ms) {
+    if (cloud || !ghCfg()) return;
+    clearTimeout(ghTimer); ghTimer = setTimeout(() => { ghTimer = null; ghPush(); }, ms == null ? 30000 : ms);
+  }
+  function ghReq(c, method, body) {
+    const h = { Authorization: 'Bearer ' + c.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    if (body) h['Content-Type'] = 'application/json';
+    return fetch('https://api.github.com/repos/' + c.repo + '/contents/' + GH_FILE, { method, headers: h, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
+  }
+  const ghB64 = s => { const u = new TextEncoder().encode(s); let b = ''; for (let i = 0; i < u.length; i += 0x8000) b += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(b); };
+  const ghUnB64 = s => new TextDecoder().decode(Uint8Array.from(atob(String(s).replace(/\s/g, '')), ch => ch.charCodeAt(0)));
+  async function ghRemote(c) {
+    const r = await ghReq(c, 'GET');
+    if (r.status === 404) return { sha: null, body: null };
+    if (!r.ok) throw r;
+    const j = await r.json(); let body = null;
+    try { const b = JSON.parse(ghUnB64(j.content || '')); body = JSON.stringify({ state: b.state, logs: b.logs }); } catch (e) { }
+    return { sha: j.sha, body };
+  }
+  function ghErrText(e) {
+    const st = e && e.status;
+    if (st === 401) return '钥匙无效或已经过期，请重新做一把钥匙填进来。';
+    if (st === 403) return '这把钥匙没有写入权限。做钥匙时 Contents 要选 Read and write。';
+    if (st === 404) return '找不到这个仓库。检查仓库名，以及钥匙是不是选了这个仓库。';
+    if (st) return 'GitHub 返回了错误（' + st + '），稍后会再试。';
+    return '现在连不上网络，联网后会自动再试。';
+  }
+  // 上传一次；返回 true 表示成功（或内容没变不需要上传）
+  async function ghPush(cfgOverride) {
+    const c = cfgOverride || ghCfg(); if (cloud || !c || !S) return false;
+    if (ghBusy) { ghAgain = true; return false; }
+    ghBusy = true; let ok = false;
+    try {
+      const body = JSON.stringify({ state: S, logs: localLogs() });
+      if (body !== ghLast || cfgOverride) {
+        if (ghSha === undefined || cfgOverride) { const rm = await ghRemote(c); ghSha = rm.sha; if (rm.body === body) ghLast = body; }
+        if (body !== ghLast) {
+          const now = new Date(), stamp = L.dayKey(now.getTime()) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+          const full = JSON.stringify({ app: 'study-gacha-bank', v: 1, exported: now.toISOString(), state: S, logs: localLogs() }, null, 1);
+          const put = () => ghReq(c, 'PUT', Object.assign({ message: '同步 ' + stamp, content: ghB64(full) }, ghSha ? { sha: ghSha } : {}));
+          let r = await put();
+          if (r.status === 409 || r.status === 422) { ghSha = (await ghRemote(c)).sha; r = await put(); }
+          if (!r.ok) throw r;
+          ghSha = (await r.json()).content.sha; ghLast = body;
+        }
+      }
+      ok = true; if (!cfgOverride) ghNote({ lastOk: Date.now(), lastErr: '' });
+    } catch (e) {
+      if (!cfgOverride) { ghNote({ lastErr: ghErrText(e) }); if (!(e && e.status) || e.status >= 500) ghSchedule(5 * 60000); }
+      else ghPush.lastErr = ghErrText(e);
+    }
+    ghBusy = false;
+    if (ghAgain) { ghAgain = false; ghSchedule(2000); }
+    return ok;
+  }
+  function ghSettingsHtml() {
+    if (cloud) return '';
+    const c = ghCfg();
+    let h = '<section class="sec"><h2>同步到 GitHub</h2><p class="small muted" style="margin:0">把数据自动存一份到你自己的私有 GitHub 仓库：多一份自动备份，也方便让 AI 帮你看流水。记账后大约半分钟自动上传。钥匙只保存在这台设备里，不会放进导出的备份。</p>';
+    if (c) {
+      const t = c.lastOk ? new Date(c.lastOk) : null;
+      h += '<p class="small" style="margin:0">仓库：<b>' + esc(c.repo) + '</b><br>' + (t ? '上次同步：' + (t.getMonth() + 1) + '/' + t.getDate() + ' ' + pad(t.getHours()) + ':' + pad(t.getMinutes()) : '还没有同步过') + '</p>' +
+        (c.lastErr ? '<p class="small" style="margin:0;color:var(--warn)">' + esc(c.lastErr) + '</p>' : '') +
+        '<div class="row"><button class="btn" data-act="gh-now">立即同步</button><button class="btn ghost" data-act="gh-off">关闭同步</button></div>';
+    } else {
+      h += '<label class="field">仓库（用户名/仓库名）<input type="text" id="gh-repo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="比如：你的用户名/study-bank-data"></label>' +
+        '<label class="field">钥匙（以 github_pat_ 开头）<input type="password" id="gh-token" autocomplete="off" autocapitalize="off" spellcheck="false"></label>' +
+        '<p class="small" id="gherr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="gh-save">保存并测试</button></div>';
+    }
+    return h + '</section>';
+  }
+  async function ghSave() {
+    const repo = $('#gh-repo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, ''), token = $('#gh-token').value.trim(), err = $('#gherr');
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { err.textContent = '仓库要写成"用户名/仓库名"的样子。'; return; }
+    if (!token) { err.textContent = '请把钥匙粘贴进来。'; return; }
+    err.style.color = 'var(--muted)'; err.textContent = '正在测试……';
+    const c = { repo, token }; ghSha = undefined; ghLast = null;
+    if (await ghPush(c)) { ghSetCfg(Object.assign(c, { lastOk: Date.now(), lastErr: '' })); toast('已连接，数据已经同步到 GitHub。'); renderMain(); }
+    else { err.style.color = 'var(--warn)'; err.textContent = ghPush.lastErr || '没能连上。'; }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden && ghTimer) { clearTimeout(ghTimer); ghTimer = null; ghPush(); } });
+
   function logAppend(entries, session) {
     const now = Date.now(), k = L.dayKey(now), aid = S ? (S.act || 0) : 0;
     if (!(entries && entries.length) && !session) return;
@@ -163,7 +252,7 @@
     cloud = false;
     try { S = JSON.parse(localStorage.getItem('bank-local-state')); } catch (e) { S = null; }
     phase = S ? 'ready' : 'onboard';
-    if (S) { if (L.migrate(S)) save(); if (S.timer) overlayOpen = true; checkRollover(Date.now()); }
+    if (S) { if (L.migrate(S)) save(); if (S.timer) overlayOpen = true; checkRollover(Date.now()); ghSchedule(5000); }
     render();
   }
   function checkRollover(now) {
@@ -838,6 +927,7 @@
       '<p class="small" id="seterr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="save-settings">保存设置</button><button class="btn ghost" data-act="reset-settings">填回默认值</button></div></section>';
     h += '<section class="sec"><h2>备份</h2><p class="small muted" style="margin:0">' + (cloud ? '数据保存在云端，多台设备会自动同步。' : '数据只保存在这台设备的这个浏览器里，换设备或清除 Safari 数据会丢失。') + '建议每周导出一次备份，存到“文件”App 或 iCloud，需要时再导入恢复。</p><div class="row">' +
       '<button class="btn" data-act="export">导出备份</button><label class="btn" for="importfile" tabindex="0">导入备份</label><input type="file" id="importfile" accept=".json,application/json" hidden></div></section>';
+    h += ghSettingsHtml();
     h += '<section class="sec"><h2>关于</h2><p style="margin:0"><b class="num" style="color:var(--brass-hi)">版本 ' + APP_VERSION + '</b> <span class="small muted">· ' + (cloud ? 'Claude 版' : '独立版') + ' · ' + APP_DATE + '</span></p><p class="small muted" style="margin:0">本页为免费的非官方同人作品，与 Larian Studios、Wizards of the Coast 无关，未经其批准或认可。同伴角色及其名称属于《博德之门 3》，版权归 Larian Studios 及 Wizards of the Coast 所有。</p>' +
       '<p class="small muted" style="margin:0" lang="en">学习抽卡银行 (Study Gacha Bank) is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. &copy;Wizards of the Coast LLC. Baldur&#39;s Gate 3 characters &copy; Larian Studios. This is free, non-commercial fan content and is not affiliated with Larian Studios.</p></section>';
     return h;
@@ -1064,6 +1154,9 @@
     'reset-settings': () => { const d = L.defaultSettings(); FIELDS.forEach(f => { $('#set-' + f[0]).value = d[f[0]]; }); d.pool.forEach((p, i) => { $('#pool-p-' + i).value = p.p; $('#pool-m-' + i).value = p.m; }); $('#seterr').textContent = '已填回默认值，点保存设置后才会生效。'; },
     'cancel-pending': () => { S.pendingSettings = null; save(); renderMain(); },
     export: exportBackup,
+    'gh-save': ghSave,
+    'gh-now': async () => { toast('正在同步……'); ghLast = null; if (await ghPush()) toast('已同步到 GitHub。'); },
+    'gh-off': () => confirmBox('关闭同步到 GitHub？', '这台设备会忘掉钥匙，之后不再上传。GitHub 上已经存的数据不会删除。', '关闭同步', () => { ghSetCfg(null); clearTimeout(ghTimer); ghSha = undefined; ghLast = null; closeModal(); toast('已关闭同步。'); }),
     'm-close': closeModal,
     poke: el => { el.classList.remove('hop'); void el.offsetWidth; el.classList.add('hop'); try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {} el.addEventListener('animationend', () => el.classList.remove('hop'), { once: true }); },
     mate: el => { const m = MATES[Number(el.dataset.n)]; if (m) toast('<b style="font-family:var(--display)">' + m.name + '</b>　' + esc(anyLine(m.idle.concat(m.go))), 5000); },

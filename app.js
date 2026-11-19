@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.7.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.7.1', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -116,7 +116,13 @@
   }
   /* ---------- 同步到 GitHub（只在独立版）：把数据存一份到作者自己的私有仓库，方便备份和让 AI 读取 ---------- */
   // 设置存在 localStorage 的 bank-gh-sync 里（不放进 state，所以不会进导出的备份）
-  const GH_KEY = 'bank-gh-sync', GH_FILE = 'data.json';
+  const GH_KEY = 'bank-gh-sync', GH_DRAFT = 'bank-gh-draft', GH_FILE = 'data.json';
+  // 填到一半的仓库名和令牌先记在本机，离开页面再回来也还在；连接成功后清掉
+  function ghDraft() { try { return JSON.parse(localStorage.getItem(GH_DRAFT)) || {}; } catch (e) { return {}; } }
+  document.addEventListener('input', e => {
+    if (e.target.id !== 'gh-repo' && e.target.id !== 'gh-token') return;
+    try { localStorage.setItem(GH_DRAFT, JSON.stringify({ repo: ($('#gh-repo') || {}).value || '', token: ($('#gh-token') || {}).value || '' })); } catch (er) { }
+  });
   let ghTimer = null, ghBusy = false, ghAgain = false, ghSha = undefined, ghLast = null;
   function ghCfg() { try { return JSON.parse(localStorage.getItem(GH_KEY)) || null; } catch (e) { return null; } }
   function ghSetCfg(c) { try { if (c) localStorage.setItem(GH_KEY, JSON.stringify(c)); else localStorage.removeItem(GH_KEY); } catch (e) { } }
@@ -142,9 +148,9 @@
   }
   function ghErrText(e) {
     const st = e && e.status;
-    if (st === 401) return '钥匙无效或已经过期，请重新做一把钥匙填进来。';
-    if (st === 403) return '这把钥匙没有写入权限。做钥匙时 Contents 要选 Read and write。';
-    if (st === 404) return '找不到这个仓库。检查仓库名，以及钥匙是不是选了这个仓库。';
+    if (st === 401) return '令牌无效或已经过期。请在 GitHub 上重新生成令牌，再填进来。';
+    if (st === 403) return '这个令牌没有写入权限。生成令牌时 Contents 要选 Read and write。';
+    if (st === 404) return '找不到这个仓库。检查仓库名，以及生成令牌时是不是选了这个仓库。';
     if (st) return 'GitHub 返回了错误（' + st + '），稍后会再试。';
     return '现在连不上网络，联网后会自动再试。';
   }
@@ -179,15 +185,17 @@
   function ghSettingsHtml() {
     if (cloud) return '';
     const c = ghCfg();
-    let h = '<section class="sec"><h2>同步到 GitHub</h2><p class="small muted" style="margin:0">把数据自动存一份到你自己的私有 GitHub 仓库：多一份自动备份，也方便让 AI 帮你看流水。记账后大约半分钟自动上传。钥匙只保存在这台设备里，不会放进导出的备份。</p>';
+    let h = '<section class="sec"><h2>同步到 GitHub</h2><p class="small muted" style="margin:0">把数据自动存一份到你自己的私有 GitHub 仓库：多一份自动备份，也方便让 AI 帮你看流水。记账后大约半分钟自动上传。令牌只保存在这台设备里，不会放进导出的备份。</p>';
     if (c) {
       const t = c.lastOk ? new Date(c.lastOk) : null;
       h += '<p class="small" style="margin:0">仓库：<b>' + esc(c.repo) + '</b><br>' + (t ? '上次同步：' + (t.getMonth() + 1) + '/' + t.getDate() + ' ' + pad(t.getHours()) + ':' + pad(t.getMinutes()) : '还没有同步过') + '</p>' +
         (c.lastErr ? '<p class="small" style="margin:0;color:var(--warn)">' + esc(c.lastErr) + '</p>' : '') +
         '<div class="row"><button class="btn" data-act="gh-now">立即同步</button><button class="btn ghost" data-act="gh-off">关闭同步</button></div>';
     } else {
-      h += '<label class="field">仓库（用户名/仓库名）<input type="text" id="gh-repo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="比如：你的用户名/study-bank-data"></label>' +
-        '<label class="field">钥匙（以 github_pat_ 开头）<input type="password" id="gh-token" autocomplete="off" autocapitalize="off" spellcheck="false"></label>' +
+      const dr = ghDraft();
+      h += '<label class="field">仓库（用户名/仓库名）<input type="text" id="gh-repo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="比如：你的用户名/study-bank-data" value="' + esc(dr.repo || '') + '"></label>' +
+        '<label class="field">令牌（以 github_pat_ 开头）<input type="password" id="gh-token" autocomplete="off" autocapitalize="off" spellcheck="false" value="' + esc(dr.token || '') + '"></label>' +
+        '<p class="small muted" style="margin:0">填到一半离开也没关系，回来时还在。</p>' +
         '<p class="small" id="gherr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="gh-save">保存并测试</button></div>';
     }
     return h + '</section>';
@@ -195,10 +203,10 @@
   async function ghSave() {
     const repo = $('#gh-repo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, ''), token = $('#gh-token').value.trim(), err = $('#gherr');
     if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) { err.textContent = '仓库要写成"用户名/仓库名"的样子。'; return; }
-    if (!token) { err.textContent = '请把钥匙粘贴进来。'; return; }
+    if (!token) { err.textContent = '请把令牌粘贴进来。'; return; }
     err.style.color = 'var(--muted)'; err.textContent = '正在测试……';
     const c = { repo, token }; ghSha = undefined; ghLast = null;
-    if (await ghPush(c)) { ghSetCfg(Object.assign(c, { lastOk: Date.now(), lastErr: '' })); toast('已连接，数据已经同步到 GitHub。'); renderMain(); }
+    if (await ghPush(c)) { ghSetCfg(Object.assign(c, { lastOk: Date.now(), lastErr: '' })); try { localStorage.removeItem(GH_DRAFT); } catch (e) { } toast('已连接，数据已经同步到 GitHub。'); renderMain(); }
     else { err.style.color = 'var(--warn)'; err.textContent = ghPush.lastErr || '没能连上。'; }
   }
   document.addEventListener('visibilitychange', () => { if (document.hidden && ghTimer) { clearTimeout(ghTimer); ghTimer = null; ghPush(); } });
@@ -1156,7 +1164,7 @@
     export: exportBackup,
     'gh-save': ghSave,
     'gh-now': async () => { toast('正在同步……'); ghLast = null; if (await ghPush()) toast('已同步到 GitHub。'); },
-    'gh-off': () => confirmBox('关闭同步到 GitHub？', '这台设备会忘掉钥匙，之后不再上传。GitHub 上已经存的数据不会删除。', '关闭同步', () => { ghSetCfg(null); clearTimeout(ghTimer); ghSha = undefined; ghLast = null; closeModal(); toast('已关闭同步。'); }),
+    'gh-off': () => confirmBox('关闭同步到 GitHub？', '这台设备会忘掉令牌，之后不再上传。GitHub 上已经存的数据不会删除。', '关闭同步', () => { ghSetCfg(null); clearTimeout(ghTimer); ghSha = undefined; ghLast = null; closeModal(); toast('已关闭同步。'); }),
     'm-close': closeModal,
     poke: el => { el.classList.remove('hop'); void el.offsetWidth; el.classList.add('hop'); try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {} el.addEventListener('animationend', () => el.classList.remove('hop'), { once: true }); },
     mate: el => { const m = MATES[Number(el.dataset.n)]; if (m) toast('<b style="font-family:var(--display)">' + m.name + '</b>　' + esc(anyLine(m.idle.concat(m.go))), 5000); },

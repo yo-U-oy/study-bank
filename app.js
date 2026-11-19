@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.5.3', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.6.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -439,7 +439,7 @@
         else if (g.date) tags += ' <span class="tag">' + (g.date === today ? '今天' : g.date.slice(5).replace('-', '/')) + '</span>';
         if (allDone) tags += ' <span class="tag ok">已完成</span>';
         h += '<article class="spcard' + (allDone ? ' done' : '') + '">';
-        if (title || tags) h += '<div class="sphead"><b>' + esc(title) + '</b>' + tags + '<span class="grow"></span><button class="icon sm" data-act="sp-del" data-id="' + g.id + '" aria-label="删除这组特别任务">&times;</button></div>';
+        if (title || tags) h += '<div class="sphead"><b>' + esc(title) + '</b>' + tags + '<span class="grow"></span><button class="btn sm ghost" data-act="sp-edit" data-id="' + g.id + '" aria-label="修改这组特别任务">修改</button><button class="icon sm" data-act="sp-del" data-id="' + g.id + '" aria-label="删除这组特别任务">&times;</button></div>';
         g.items.forEach(x => {
           const running = S.timer && S.timer.taskId === x.id, sec = (x.sec || 0) + (running ? liveExtra(now) : 0);
           const xd = L.specialDone(g, x, now), rw = L.specialReward(g, x, now);
@@ -448,7 +448,7 @@
           h += '<div class="spitem' + (xd ? ' done' : '') + '"><div class="grow"><div class="spname">' + esc(x.name) + '</div>' +
             (x.cond ? '<div class="small muted">条件：' + esc(x.cond) + '</div>' : '') + gapNote + (sec >= 60 ? '<div class="small muted">已学 <strong class="num">' + Math.floor(sec / 60) + '</strong> 分钟</div>' : '') + '</div><span class="spreward num">' + (g.repeat === 'gap' && xd ? '' : rewardText(rw.min, rw.tix)) + '</span>' +
             (xd ? '<span class="tag ok">' + (g.repeat ? '今天已完成' : '已完成') + '</span>' : !started ? '' : (running ? '<button class="btn sm" data-act="ov-open">计时中</button>' : '<button class="btn sm ghost" data-act="sp-start" data-i="' + x.id + '"' + (S.timer ? ' disabled' : '') + '>开始</button>') + '<button class="btn sm primary" data-act="sp-done" data-g="' + g.id + '" data-i="' + x.id + '">完成</button>') +
-            (!title && !tags ? '<button class="icon sm" data-act="sp-del" data-id="' + g.id + '" aria-label="删除这个特别任务">&times;</button>' : '') + '</div>';
+            (!title && !tags ? '<button class="btn sm ghost" data-act="sp-edit" data-id="' + g.id + '" aria-label="修改这个特别任务">修改</button><button class="icon sm" data-act="sp-del" data-id="' + g.id + '" aria-label="删除这个特别任务">&times;</button>' : '') + '</div>';
         });
         const bGot = g.repeat === 'daily' ? g.bonusDay === today : g.bonusDone;
         if (multi && (g.bonusMin || g.bonusTix)) h += '<div class="spbonus small' + (bGot ? ' got' : '') + '">' + (g.repeat ? '每天' : '') + '全部完成再 <b class="num">' + rewardText(g.bonusMin, g.bonusTix) + '</b>' + (bGot ? '　已领取' : '') + '</div>';
@@ -462,11 +462,11 @@
     m.draft.name = $('#sp-name').value; m.draft.date = $('#sp-date').value; m.draft.repeat = $('#sp-rep').checked; m.draft.gap = $('#sp-gap').checked;
     m.draft.gapDays = $('#sp-gd').value; m.draft.gapAmt = $('#sp-ga').value; m.draft.gapType = $('#sp-gt').value;
     m.draft.bonus = $('#sp-bonus').value; m.draft.bonusType = $('#sp-btype').value;
-    m.draft.items = m.draft.items.map((it, i) => ({ name: $('#sp-n' + i).value, amt: $('#sp-a' + i).value, type: $('#sp-t' + i).value, cond: $('#sp-c' + i).value, showCond: it.showCond || !!$('#sp-c' + i).value }));
+    m.draft.items = m.draft.items.map((it, i) => ({ name: $('#sp-n' + i).value, amt: $('#sp-a' + i).value, type: $('#sp-t' + i).value, cond: $('#sp-c' + i).value, showCond: it.showCond || !!$('#sp-c' + i).value, id: it.id }));
   }
   function spNewHtml(m) {
     const d = m.draft, typeSel = (id, v) => '<select id="' + id + '"><option value="min"' + (v !== 'tix' ? ' selected' : '') + '>分钟</option><option value="tix"' + (v === 'tix' ? ' selected' : '') + '>抽奖券</option></select>';
-    let b = '<h3>新建特别任务</h3><p class="small muted" style="margin:0">自己定一件或几件想做的事，完成后直接拿奖励。奖励多少由你决定。</p>' +
+    let b = '<h3>' + (m.editId ? '修改特别任务' : '新建特别任务') + '</h3><p class="small muted" style="margin:0">' + (m.editId ? '改完点"保存修改"。已经完成的状态和领到的奖励不会变。' : '自己定一件或几件想做的事，完成后直接拿奖励。奖励多少由你决定。') + '</p>' +
       '<div class="grid2"><label class="field">组名（可不填）<input type="text" id="sp-name" maxlength="30" placeholder="比如：11/19 特别任务" value="' + esc(d.name) + '"></label>' +
       '<label class="field">日期（可不填）<input type="date" id="sp-date" value="' + esc(d.date) + '"></label></div>' +
       '<label class="check"><input type="checkbox" id="sp-rep"' + (d.repeat ? ' checked' : '') + '>每天重复（比如整理书桌，每天都能完成一次）</label>' +
@@ -485,7 +485,7 @@
     b += '<button class="btn" data-act="sp-more">+ 再加一项</button>';
     if (d.items.length > 1) b += '<div class="inline2"><label class="field">全部完成的额外奖励（可不填）<input type="number" inputmode="numeric" min="0" id="sp-bonus" placeholder="20" value="' + esc(d.bonus) + '"></label><label class="field">单位' + typeSel('sp-btype', d.bonusType) + '</label></div>';
     else b += '<input type="hidden" id="sp-bonus" value="' + esc(d.bonus) + '"><input type="hidden" id="sp-btype" value="' + esc(d.bonusType || 'min') + '">';
-    b += '<p class="small" id="merr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="sp-save">建好了</button><button class="btn ghost" data-act="m-close">取消</button></div>';
+    b += '<p class="small" id="merr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="sp-save">' + (m.editId ? '保存修改' : '建好了') + '</button><button class="btn ghost" data-act="m-close">取消</button></div>';
     return b;
   }
   function spSave() {
@@ -494,7 +494,7 @@
       const it = d.items[i], name = it.name.trim(), amt = Math.round(Number(it.amt));
       if (!name) { err.textContent = '第 ' + (i + 1) + ' 项还没写要做的事。'; return; }
       if (!(amt > 0)) { err.textContent = '第 ' + (i + 1) + ' 项的奖励要填大于 0 的数字。'; return; }
-      items.push({ name, min: it.type === 'tix' ? 0 : amt, tix: it.type === 'tix' ? amt : 0, cond: (it.cond || '').trim() });
+      items.push({ id: it.id, name, min: it.type === 'tix' ? 0 : amt, tix: it.type === 'tix' ? amt : 0, cond: (it.cond || '').trim() });
     }
     const bonus = Math.max(0, Math.round(Number(d.bonus) || 0));
     let gapDays = 0, gapAmt = 0;
@@ -505,7 +505,15 @@
       if (!(gapAmt > 0)) { err.textContent = '"及时完成的奖励"要填大于 0 的数字。'; return; }
     }
     const spec = { name: d.name.trim(), date: d.date || null, repeat: d.gap ? 'gap' : (d.repeat ? 'daily' : null), gapDays, gapMin: d.gapType === 'tix' ? 0 : gapAmt, gapTix: d.gapType === 'tix' ? gapAmt : 0, items, bonusMin: d.bonusType === 'tix' ? 0 : bonus, bonusTix: d.bonusType === 'tix' ? bonus : 0 };
-    if (spec.date && spec.date < L.dayKey(Date.now())) { err.textContent = '这个日期已经过去了，选今天或以后的日子。'; return; }
+    const eg = modal.editId ? (S.specials || []).find(x => x.id === modal.editId) : null;
+    if (modal.editId && !eg) { closeModal(); return; }
+    if (spec.date && spec.date < L.dayKey(Date.now()) && !(eg && eg.date === spec.date)) { err.textContent = '这个日期已经过去了，选今天或以后的日子。'; return; }
+    if (eg) {
+      const keep = items.map(x => x.id).filter(Boolean), gone = eg.items.filter(x => !keep.includes(x.id));
+      if (S.timer && gone.some(x => x.id === S.timer.taskId)) { err.textContent = '「' + (S.timer.name || '这一项') + '」正在计时，先结束计时再删掉它。'; return; }
+      act('修改特别任务：' + (spec.name || items[0].name), () => L.updateSpecial(S, eg.id, spec, Date.now()));
+      save(); closeModal(); toastUndo('已保存修改。'); return;
+    }
     act('新建特别任务' + (spec.name ? '：' + spec.name : '：' + items[0].name), () => L.newSpecial(S, spec, Date.now()));
     collapsed.special = false; save(); closeModal(); toastUndo('特别任务建好了。');
   }
@@ -1027,6 +1035,17 @@
     'sp-save': spSave,
     'sp-start': el => { const it = L.findSpecialItem(S, el.dataset.i); if (it) startTimer('study', { id: it.id, name: it.name, mode: 'up', downMin: 25 }); },
     'sp-done': el => { modal = { type: 'sp-confirm', step: 'ask', gid: el.dataset.g, iid: el.dataset.i, n: 1 + Math.floor(Math.random() * SPRITES) }; renderLayer(); },
+    'sp-edit': el => {
+      const g = S.specials.find(x => x.id === el.dataset.id); if (!g) return;
+      const amt = (min, tix) => String(tix || min || ''), typ = (min, tix) => (tix ? 'tix' : 'min');
+      modal = { type: 'sp-new', editId: g.id, draft: {
+        name: g.name || '', date: g.date || '', repeat: g.repeat === 'daily', gap: g.repeat === 'gap',
+        gapDays: String(g.gapDays || 3), gapAmt: amt(g.gapMin, g.gapTix), gapType: typ(g.gapMin, g.gapTix),
+        bonus: amt(g.bonusMin, g.bonusTix), bonusType: typ(g.bonusMin, g.bonusTix),
+        items: g.items.map(x => ({ id: x.id, name: x.name, amt: amt(x.min, x.tix), type: typ(x.min, x.tix), cond: x.cond || '', showCond: !!x.cond }))
+      } };
+      renderLayer();
+    },
     'sp-del': el => {
       const g = S.specials.find(x => x.id === el.dataset.id); if (!g) return;
       confirmBox('删除这个特别任务？', '「' + esc(g.name || g.items.map(x => x.name).join('、')) + '」会从列表里拿掉。已经领到的奖励不会收回。', '删除', () => {

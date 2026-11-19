@@ -273,6 +273,27 @@
     return ev;
   }
 
-  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward };
+  // 修改已建好的特别任务：保留每一项的编号、完成状态、已学时间；新增的项给新编号
+  function updateSpecial(state, gid, spec, now) {
+    const g = (state.specials || []).find(x => x.id === gid); if (!g) return null;
+    const wasPer = perDay(g), today = dayKey(now), old = g.items;
+    g.name = spec.name || ''; g.date = spec.date || null; g.repeat = spec.repeat || null;
+    g.bonusMin = spec.bonusMin || 0; g.bonusTix = spec.bonusTix || 0;
+    if (g.repeat === 'gap') { g.gapDays = spec.gapDays || 3; g.gapMin = spec.gapMin || 0; g.gapTix = spec.gapTix || 0; if (!g.lastDay) g.lastDay = null; }
+    let n = old.reduce((a, x) => Math.max(a, parseInt(String(x.id).split('-').pop(), 10) || 0), 0);
+    g.items = spec.items.map(it => {
+      const o = it.id && old.find(x => x.id === it.id);
+      if (o) { o.name = it.name; o.min = it.min || 0; o.tix = it.tix || 0; o.cond = it.cond || ''; return o; }
+      n++; return { id: g.id + '-' + n, name: it.name, min: it.min || 0, tix: it.tix || 0, cond: it.cond || '', sec: 0, done: false, doneAt: null };
+    });
+    const nowPer = perDay(g);
+    g.items.forEach(o => {
+      if (nowPer && !wasPer && o.done && o.doneAt) o.doneDay = dayKey(o.doneAt);
+      if (!nowPer && wasPer && o.doneDay === today) o.done = true;
+    });
+    return g;
+  }
+
+  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward, updateSpecial };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Logic = api;
 })(typeof window !== 'undefined' ? window : globalThis);

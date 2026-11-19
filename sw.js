@@ -1,5 +1,5 @@
 // 离线缓存：先用缓存里的文件马上打开，同时在后台取最新版本，下次打开时生效
-const VERSION = '1.5.3'; // 和 app.js 的 APP_VERSION 保持一致；改了它，手机才会去下载新版
+const VERSION = '1.6.0'; // 和 app.js 的 APP_VERSION 保持一致；改了它，手机才会去下载新版
 const CACHE = 'study-bank-' + VERSION;
 const SHELL = ['./', './index.html', './app.js', './logic.js', './voices.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',

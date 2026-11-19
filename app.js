@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.5.2', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.5.3', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -905,7 +905,7 @@
       b = '<h3>' + (isNew ? '添加任务到「' + g.name + '」' : '修改任务') + '</h3>' +
         '<label class="field">名称<input type="text" id="t-name" maxlength="40" value="' + esc(x.name) + '"></label>' +
         '<label class="field">计时方式<select id="t-mode"><option value="up"' + (x.mode === 'up' ? ' selected' : '') + '>正计时</option><option value="down"' + (x.mode === 'down' ? ' selected' : '') + '>倒计时</option><option value="pomo"' + (x.mode === 'pomo' ? ' selected' : '') + '>番茄钟（25 分钟）</option></select></label>' +
-        '<label class="field">倒计时分钟数（只在倒计时方式下使用）<input type="number" inputmode="numeric" min="1" id="t-down" value="' + x.downMin + '"></label>';
+        '<div id="t-down-wrap"' + (x.mode === 'down' ? '' : ' style="display:none"') + '><label class="field">倒计时分钟数<input type="number" inputmode="numeric" min="1" id="t-down" value="' + x.downMin + '"></label></div>';
       if (per !== 'once') b += '<label class="check"><input type="checkbox" id="t-manual"' + (x.manual ? ' checked' : '') + '>手动勾选（用于上课这类没法计时的任务）</label>' +
         '<div class="grid2"><label class="field">累计多少分钟算完成一次<input type="number" inputmode="numeric" min="1" id="t-th" value="' + x.threshold + '"></label>' +
         '<label class="field">' + (per === 'day' ? '每天' : '每周') + '目标次数<input type="number" inputmode="numeric" min="1" id="t-tg" value="' + x.target + '"></label></div>';
@@ -1068,6 +1068,7 @@
     const el = e.target.closest('[data-act]'); if (!el || el.disabled) return;
     const fn = ACT[el.dataset.act]; if (fn && (S || el.dataset.act === 'create')) fn(el, e);
   });
+  document.addEventListener('change', e => { if (e.target.id === 't-mode') { const w = $('#t-down-wrap'); if (w) w.style.display = e.target.value === 'down' ? '' : 'none'; } });
   document.addEventListener('change', e => { if (e.target.id === 'importfile' && e.target.files[0]) { importBackup(e.target.files[0]); e.target.value = ''; } });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && modal) closeModal();

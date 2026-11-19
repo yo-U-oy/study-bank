@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.11.1', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.12.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -528,7 +528,8 @@
     pageAnim = '';
     if (todayPage === 'special') h += specialsHtml(now);
     else L.GROUPS.forEach(g => {
-      const list = S.tasks.filter(x => x.group === g.id), open = !collapsed[g.id];
+      const list = S.tasks.filter(x => x.group === g.id && !L.isEnded(S, x)), open = !collapsed[g.id];
+      const adds = (S.scheduled || []).filter(q => q.type === 'task-add' && q.data.group === g.id);
       let meta = '';
       if (g.id === 'daily' || g.id === 'weekly') {
         const act = list.filter(x => L.isActive(S, x));
@@ -537,13 +538,57 @@
       h += '<section class="group" data-g="' + g.id + '"><div class="ghead"><h2>' + tt(g.name) + '</h2><span class="meta">' + meta + '</span>' +
         '<button class="icon" data-act="collapse" data-g="' + g.id + '" aria-label="' + (open ? tt('收起') : tt('展开')) + tt(g.name) + '">' + (open ? '&#8964;' : '&#8250;') + '</button>' +
         '<button class="icon" data-act="add" data-g="' + g.id + tt('" aria-label="在') + tt(g.name) + tt('里添加任务">+</button></div>');
-      if (open) h += list.length ? list.map(x => card(x, g, now)).join('') : tt('<p class="muted small" style="margin:0 0 0 16px">这里还没有任务。</p>');
+      if (open) h += (list.length ? list.map(x => card(x, g, now)).join('') : (adds.length ? '' : tt('<p class="muted small" style="margin:0 0 0 16px">这里还没有任务。</p>'))) +
+        adds.map(q => '<p class="small muted qadd">' + tt('# 加入：').replace('#', mdLabel(q.at)) + esc(q.data.name) + '</p>').join('');
       h += '</section>';
     });
     h += '</div>';
     h += '<button class="btn" data-act="free"' + (t ? ' disabled' : '') + tt('>自由学习（不选任务，直接计时）</button>');
     return h;
   }
+  /* ---------- 生效时间：每次修改都问一下（默认立即），以后的日子先排队 ---------- */
+  const mdLabel = k => Number(k.slice(5, 7)) + '/' + Number(k.slice(8, 10));
+  function whenHtml(sel, date) {
+    const now = Date.now(), mon = L.nextWeekKey(now), tmr = L.nextDayKey(now), r = v => (sel || 'now') === v ? ' checked' : '';
+    return '<fieldset class="when"><legend>' + tt('什么时候生效？') + '</legend><div class="whenopts">' +
+      '<label class="check"><input type="radio" name="when" value="now"' + r('now') + '>' + tt('立即') + '</label>' +
+      '<label class="check"><input type="radio" name="when" value="mon"' + r('mon') + '>' + tt('下周一') + tt('（') + mdLabel(mon) + tt('）') + '</label>' +
+      '<label class="check"><input type="radio" name="when" value="date"' + r('date') + '>' + tt('选日期') + '</label>' +
+      '<input type="date" id="when-date" min="' + tmr + '" value="' + esc(date || '') + '" aria-label="' + tt('生效日期') + '"></div>' +
+      '<p class="small muted" style="margin:0">' + tt('选以后的日子，修改会先排队，到那天凌晨 4:00 自动生效。') + '</p></fieldset>';
+  }
+  function whenRaw() { const r = document.querySelector('input[name="when"]:checked'); return { sel: r ? r.value : 'now', date: ($('#when-date') || {}).value || '' }; }
+  // 返回 { at: null }（立即）或 { at: '日期' }；日期不对时在 errEl 里提示并返回 null
+  function readWhen(errEl) {
+    const w = whenRaw();
+    if (w.sel === 'now') return { at: null };
+    if (w.sel === 'mon') return { at: L.nextWeekKey(Date.now()) };
+    if (!w.date || w.date <= L.dayKey(Date.now())) { if (errEl) errEl.textContent = tt('请选一个明天或以后的日期。'); return null; }
+    return { at: w.date };
+  }
+  document.addEventListener('input', e => { if (e.target.id === 'when-date') { const r = document.querySelector('input[name="when"][value="date"]'); if (r) r.checked = true; } });
+  const queued = (type, key, id) => (S.scheduled || []).filter(q => q.type === type && q.data[key] === id);
+  function qDesc(q) {
+    const d = q.data, tname = id => { const t = S.tasks.find(x => x.id === id); return t ? t.name : tt('已删除的任务'); };
+    const spName = sp => sp.name || sp.items.map(i => i.name).join(tt('、'));
+    const sname = gid => { const g = (S.specials || []).find(x => x.id === gid); return g ? spName(g) : tt('已删除的特别任务'); };
+    if (q.type === 'settings') return tt('修改奖励数值和奖池');
+    if (q.type === 'task-add') { const g = L.GROUPS.find(x => x.id === d.group); return tt('添加任务：') + d.name + (g ? tt('（') + tt(g.name).trim() + tt('）') : ''); }
+    if (q.type === 'task-edit') return tt('修改任务：') + tname(d.id);
+    if (q.type === 'task-del') return tt('删除任务：') + tname(d.id);
+    if (q.type === 'sp-add') return tt('新建特别任务：') + spName(d.spec);
+    if (q.type === 'sp-edit') return tt('修改特别任务：') + sname(d.gid);
+    if (q.type === 'sp-del') return tt('删除特别任务：') + sname(d.gid);
+    return q.type;
+  }
+  function queueHtml() {
+    const list = (S.scheduled || []).slice().sort((a, b) => a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
+    if (!list.length) return '';
+    return '<section class="sec"><h2>' + tt('准备生效的修改') + '</h2><p class="small muted" style="margin:0">' + tt('到了日期的凌晨 4:00 自动生效。不想要了可以取消。') + '</p>' +
+      list.map(q => '<div class="qrow"><span class="tag">' + mdLabel(q.at) + '</span><span class="grow">' + esc(qDesc(q)) + '</span><button class="btn sm ghost" data-act="q-cancel" data-id="' + q.id + '">' + tt('取消') + '</button></div>').join('') + '</section>';
+  }
+  const queuedNote = at => tt('已排好，#凌晨 4:00 生效。').replace('#', mdLabel(at));
+
   /* ---------- 特别任务 ---------- */
   const rewardText = (min, tix) => [min ? '+' + min + tt(' 分钟') : '', tix ? '+' + tix + tt(' 张券') : ''].filter(Boolean).join(' ');
   function specialsHtml(now) {
@@ -553,7 +598,9 @@
       '<button class="icon" data-act="collapse" data-g="special" aria-label="' + (open ? tt('收起') : tt('展开')) + tt('特别任务">') + (open ? '&#8964;' : '&#8250;') + '</button>' +
       tt('<button class="icon" data-act="sp-add" aria-label="新建特别任务">+</button></div>');
     if (open) {
-      if (!list.length) h += tt('<p class="muted small" style="margin:0 0 0 16px">想给自己定一件额外的事？点右边的 + 新建，完成后直接拿奖励。</p>');
+      const spAdds = (S.scheduled || []).filter(q => q.type === 'sp-add');
+      if (!list.length && !spAdds.length) h += tt('<p class="muted small" style="margin:0 0 0 16px">想给自己定一件额外的事？点右边的 + 新建，完成后直接拿奖励。</p>');
+      h += spAdds.map(q => '<p class="small muted qadd">' + tt('# 加入：').replace('#', mdLabel(q.at)) + esc(q.data.spec.name || q.data.spec.items.map(i => i.name).join(tt('、'))) + '</p>').join('');
       list.forEach(g => {
         const today = L.dayKey(now), multi = g.items.length > 1, started = L.specialStarted(g, now), allDone = started && g.items.every(x => L.specialDone(g, x, now));
         const title = g.name || (multi ? tt('特别任务') : '');
@@ -562,6 +609,8 @@
         else if (g.repeat === 'gap') tags += tt(' <span class="tag">按间隔</span>');
         else if (g.date) tags += ' <span class="tag">' + (g.date === today ? tt('今天') : g.date.slice(5).replace('-', '/')) + '</span>';
         if (allDone) tags += tt(' <span class="tag ok">已完成</span>');
+        queued('sp-edit', 'gid', g.id).forEach(q => { tags += ' <span class="tag">' + tt('# 修改').replace('#', mdLabel(q.at)) + '</span>'; });
+        queued('sp-del', 'gid', g.id).forEach(q => { tags += ' <span class="tag">' + tt('# 删除').replace('#', mdLabel(q.at)) + '</span>'; });
         h += '<article class="spcard' + (allDone ? ' done' : '') + '">';
         if (title || tags) h += '<div class="sphead"><b>' + esc(title) + '</b>' + tags + '<span class="grow"></span><button class="btn sm ghost" data-act="sp-edit" data-id="' + g.id + tt('" aria-label="修改这组特别任务">修改</button><button class="icon sm" data-act="sp-del" data-id="') + g.id + tt('" aria-label="删除这组特别任务">&times;</button></div>');
         g.items.forEach(x => {
@@ -583,7 +632,7 @@
   }
   function spDraftRead() {
     const m = modal; if (!m || m.type !== 'sp-new') return;
-    m.draft.name = $('#sp-name').value; m.draft.date = $('#sp-date').value; m.draft.repeat = $('#sp-rep').checked; m.draft.gap = $('#sp-gap').checked;
+    m.draft.name = $('#sp-name').value; m.draft.date = $('#sp-date').value; m.draft.repeat = $('#sp-rep').checked; const wr = whenRaw(); m.draft.when = wr.sel; m.draft.whenDate = wr.date; m.draft.gap = $('#sp-gap').checked;
     m.draft.gapDays = $('#sp-gd').value; m.draft.gapAmt = $('#sp-ga').value; m.draft.gapType = $('#sp-gt').value;
     m.draft.bonus = $('#sp-bonus').value; m.draft.bonusType = $('#sp-btype').value;
     m.draft.items = m.draft.items.map((it, i) => ({ name: $('#sp-n' + i).value, amt: $('#sp-a' + i).value, type: $('#sp-t' + i).value, cond: $('#sp-c' + i).value, showCond: it.showCond || !!$('#sp-c' + i).value, id: it.id }));
@@ -609,6 +658,7 @@
     b += tt('<button class="btn" data-act="sp-more">+ 再加一项</button>');
     if (d.items.length > 1) b += tt('<div class="inline2"><label class="field">全部完成的额外奖励（可不填）<input type="number" inputmode="numeric" min="0" id="sp-bonus" placeholder="20" value="') + esc(d.bonus) + tt('"></label><label class="field">单位') + typeSel('sp-btype', d.bonusType) + '</label></div>';
     else b += '<input type="hidden" id="sp-bonus" value="' + esc(d.bonus) + '"><input type="hidden" id="sp-btype" value="' + esc(d.bonusType || 'min') + '">';
+    b += whenHtml(d.when, d.whenDate);
     b += '<p class="small" id="merr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="sp-save">' + (m.editId ? tt('保存修改') : tt('建好了')) + tt('</button><button class="btn ghost" data-act="m-close">取消</button></div>');
     return b;
   }
@@ -631,6 +681,12 @@
     const spec = { name: d.name.trim(), date: d.date || null, repeat: d.gap ? 'gap' : (d.repeat ? 'daily' : null), gapDays, gapMin: d.gapType === 'tix' ? 0 : gapAmt, gapTix: d.gapType === 'tix' ? gapAmt : 0, items, bonusMin: d.bonusType === 'tix' ? 0 : bonus, bonusTix: d.bonusType === 'tix' ? bonus : 0 };
     const eg = modal.editId ? (S.specials || []).find(x => x.id === modal.editId) : null;
     if (modal.editId && !eg) { closeModal(); return; }
+    const w = readWhen(err); if (!w) return;
+    if (w.at) {
+      if (eg) act(tt('修改特别任务：') + (spec.name || items[0].name), () => L.schedule(S, w.at, 'sp-edit', { gid: eg.id, spec }, Date.now()));
+      else act(tt('新建特别任务') + tt('：') + (spec.name || items[0].name), () => L.schedule(S, w.at, 'sp-add', { spec }, Date.now()));
+      collapsed.special = false; save(); closeModal(); toastUndo(queuedNote(w.at)); return;
+    }
     if (spec.date && spec.date < L.dayKey(Date.now()) && !(eg && eg.date === spec.date)) { err.textContent = tt('这个日期已经过去了，选今天或以后的日子。'); return; }
     if (eg) {
       const keep = items.map(x => x.id).filter(Boolean), gone = eg.items.filter(x => !keep.includes(x.id));
@@ -705,12 +761,12 @@
     const active = L.isActive(S, x), cnt = L.taskCount(S, x), tgt = Math.max(1, x.target), running = S.timer && S.timer.taskId === x.id;
     const sec = L.taskSec(S, x) + (running ? liveExtra(now) : 0);
     const done = g.period !== 'once' && cnt >= tgt;
-    const next = g.period === 'day' ? tt('明天') : tt('下周');
     const modeLabel = x.manual && g.period !== 'once' ? tt('手动勾选') : ({ up: tt('正计时'), down: tt('倒计时 ') + x.downMin + tt(' 分钟'), pomo: tt('番茄钟 25 分钟') })[x.mode] || tt('正计时');
     let tags = '';
-    if (!active) tags += ' <span class="tag">' + tt('#生效').replace('#', next) + '</span>';
-    if (x.endAt) tags += ' <span class="tag">' + tt('#移除').replace('#', next) + '</span>';
-    if (x.pending) tags += ' <span class="tag">' + tt('修改#生效').replace('#', next) + '</span>';
+    if (!active && x.startDate) tags += ' <span class="tag">' + tt('从#开始').replace('#', mdLabel(x.startDate)) + '</span>';
+    else if (x.endDate) tags += ' <span class="tag">' + tt('到#结束').replace('#', mdLabel(x.endDate)) + '</span>';
+    queued('task-edit', 'id', x.id).forEach(q => { tags += ' <span class="tag">' + tt('# 修改').replace('#', mdLabel(q.at)) + '</span>'; });
+    queued('task-del', 'id', x.id).forEach(q => { tags += ' <span class="tag">' + tt('# 删除').replace('#', mdLabel(q.at)) + '</span>'; });
     if (done) tags += tt(' <span class="tag ok">已完成</span>');
     let bar = '', right = '';
     if (g.period === 'once') right = tt('已学 <strong>') + Math.floor(sec / 60) + tt('</strong> 分钟');
@@ -951,15 +1007,15 @@
     ['pityN', tt('保底抽数')], ['critPct', tt('暴击概率 %')], ['roundTo', tt('游戏扣时取整分钟')],
   ];
   function viewSettings() {
-    const cur = S.pendingSettings || S.settings, grace = S.created === S.today.key;
+    const cur = S.settings, nq = (S.scheduled || []).filter(q => q.type === 'settings').length;
     let h = pageHead(tt('设置')) +
       tt('<section class="sec"><h2>记录</h2><div class="row"><button class="btn" data-act="tab" data-tab="stats" data-back="settings">冒险记录（统计）</button><button class="btn" data-act="tab" data-tab="ledger" data-back="settings">全部流水</button></div></section>');
-    if (S.pendingSettings) h += tt('<div class="note row spread"><span>有修改会在下周一 4:00 生效，下面显示的是修改后的数值。</span><button class="btn sm" data-act="cancel-pending">取消这次修改</button></div>');
-    h += tt('<section class="sec"><h2>奖励数值</h2><p class="small muted" style="margin:0">') + (grace ? tt('今天是开始使用的第一天，修改立刻生效。') : tt('为了不让自己临时改规则，修改从下周一 4:00 开始生效。')) + '</p><div class="grid2">' +
+    h += queueHtml();
+    h += tt('<section class="sec"><h2>奖励数值</h2><p class="small muted" style="margin:0">') + tt('下面是现在正在用的数值。保存时可以选择立即生效，或者排到以后的日子。') + (nq ? ' ' + tt('有 # 个数值修改在排队，见上面「准备生效的修改」。').replace('#', nq) : '') + '</p><div class="grid2">' +
       FIELDS.map(f => '<label class="field">' + f[1] + '<input type="number" inputmode="decimal" min="0" step="any" id="set-' + f[0] + '" value="' + cur[f[0]] + '"></label>').join('') + '</div></section>';
     h += tt('<section class="sec"><h2>奖池</h2><div class="inline small muted"><span>稀有度</span><span>概率 %</span><span>分钟</span></div>') +
       cur.pool.map((p, i) => '<div class="inline"><b class="t' + p.k + '" style="font-family:var(--display)">' + rName(p.k) + '</b><input type="number" inputmode="decimal" min="0" step="any" id="pool-p-' + i + '" value="' + p.p + '" aria-label="' + p.k + tt(' 赏概率"><input type="number" inputmode="decimal" min="0" step="any" id="pool-m-') + i + '" value="' + p.m + '" aria-label="' + p.k + tt(' 赏分钟"></div>')).join('') +
-      tt('<p class="small" id="seterr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="save-settings">保存设置</button><button class="btn ghost" data-act="reset-settings">填回默认值</button></div></section>');
+      whenHtml() + tt('<p class="small" id="seterr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="save-settings">保存设置</button><button class="btn ghost" data-act="reset-settings">填回默认值</button></div></section>');
     h += tt('<section class="sec"><h2>备份</h2><p class="small muted" style="margin:0">') + (cloud ? tt('数据保存在云端，多台设备会自动同步。') : tt('数据只保存在这台设备的这个浏览器里，换设备或清除 Safari 数据会丢失。')) + tt('建议每周导出一次备份，存到“文件”App 或 iCloud，需要时再导入恢复。</p><div class="row">') +
       tt('<button class="btn" data-act="export">导出备份</button><label class="btn" for="importfile" tabindex="0">导入备份</label><input type="file" id="importfile" accept=".json,application/json" hidden></div></section>');
     h += langHtml();
@@ -977,10 +1033,11 @@
   function saveSettings() {
     const s = readSettings(), err = L.settingsError(s);
     if (err) { $('#seterr').textContent = ttLabel(err); return; }
+    const w = readWhen($('#seterr')); if (!w) return;
+    if (!w.at && JSON.stringify(s) === JSON.stringify(S.settings)) { toast(tt('数值和现在一样，没有需要修改的。')); return; }
     const u = begin(tt('修改设置'));
-    if (JSON.stringify(s) === JSON.stringify(S.settings)) { S.pendingSettings = null; toast(tt('数值和现在一样，没有需要修改的。')); }
-    else if (S.created === S.today.key) { S.settings = s; S.pendingSettings = null; toast(tt('设置已保存，立刻生效。')); }
-    else { S.pendingSettings = s; toast(tt('设置已保存，下周一 4:00 生效。')); }
+    if (!w.at) { S.settings = s; toast(tt('设置已保存，立刻生效。')); }
+    else { L.schedule(S, w.at, 'settings', { settings: s }, Date.now()); toast(queuedNote(w.at)); }
     S.undo = u; save(); renderMain();
   }
   async function exportBackup() {
@@ -1032,17 +1089,18 @@
     else if (m.type === 'copy') b = tt('<h3>复制备份内容</h3><p class="muted small" style="margin:0">这里没法直接下载文件。请复制下面的内容，粘贴到一个文本文件里保存，文件名以 .json 结尾。</p><textarea id="copyta" readonly style="width:100%;height:160px;background:var(--ink);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px"></textarea><div class="row"><button class="btn primary" data-act="m-copy">复制</button><button class="btn ghost" data-act="m-close">关闭</button></div>');
     else if (m.type === 'task') {
       const x = m.task, isNew = !m.id, g = L.GROUPS.find(q => q.id === x.group), per = g.period;
-      const deferred = (x.group === 'daily' || x.group === 'weekly' || x.group === 'extra') && S.created !== S.today.key;
-      const next = per === 'day' ? tt('明天') : tt('下周');
-      let note = '';
-      if (per !== 'once' && deferred && x.group !== 'extra') note = isNew ? tt('新任务从') + next + tt('开始计入奖励。') : tt('完成条件的修改和删除从') + next + tt('开始生效，名称和计时方式立刻生效。');
+      const note = '';
       b = '<h3>' + (isNew ? tt('添加任务到「') + tt(g.name) + tt('」') : tt('修改任务')) + '</h3>' +
         tt('<label class="field">名称<input type="text" id="t-name" maxlength="40" value="') + esc(x.name) + '"></label>' +
         tt('<label class="field">计时方式<select id="t-mode"><option value="up"') + (x.mode === 'up' ? ' selected' : '') + tt('>正计时</option><option value="down"') + (x.mode === 'down' ? ' selected' : '') + tt('>倒计时</option><option value="pomo"') + (x.mode === 'pomo' ? ' selected' : '') + tt('>番茄钟（25 分钟）</option></select></label>') +
         '<div id="t-down-wrap"' + (x.mode === 'down' ? '' : ' style="display:none"') + tt('><label class="field">倒计时分钟数<input type="number" inputmode="numeric" min="1" id="t-down" value="') + x.downMin + '"></label></div>';
       if (per !== 'once') b += '<label class="check"><input type="checkbox" id="t-manual"' + (x.manual ? ' checked' : '') + tt('>手动勾选（用于上课这类没法计时的任务）</label>') +
         tt('<div class="grid2"><label class="field">累计多少分钟算完成一次<input type="number" inputmode="numeric" min="1" id="t-th" value="') + x.threshold + '"></label>' +
-        '<label class="field">' + (per === 'day' ? tt('每天') : tt('每周')) + tt('目标次数<input type="number" inputmode="numeric" min="1" id="t-tg" value="') + x.target + '"></label></div>';
+        '<label class="field">' + (per === 'day' ? tt('每天') : tt('每周')) + tt('目标次数<input type="number" inputmode="numeric" min="1" id="t-tg" value="') + x.target + '"></label></div>' +
+        '<div class="grid2"><label class="field">' + tt('开始日期（可不填）') + '<input type="date" id="t-start" value="' + esc(x.startDate || '') + '"></label>' +
+        '<label class="field">' + tt('结束日期（可不填）') + '<input type="date" id="t-end" value="' + esc(x.endDate || '') + '"></label></div>' +
+        '<p class="small muted" style="margin:-4px 0 0">' + tt('填了日期，任务只在这段时间里显示和计算奖励；不填就一直有效。') + '</p>';
+      b += whenHtml();
       b += (note ? '<p class="small muted" style="margin:0">' + note + '</p>' : '') + '<p class="small" id="merr" style="margin:0;color:var(--warn)"></p>' +
         tt('<div class="row"><button class="btn primary" data-act="m-task-save">保存</button><button class="btn ghost" data-act="m-close">取消</button>') + (isNew ? '' : tt('<span class="grow"></span><button class="btn ghost danger" data-act="m-task-del">删除任务</button>')) + '</div>';
     }
@@ -1052,35 +1110,29 @@
     const m = modal, name = $('#t-name').value.trim(), err = $('#merr');
     if (!name) { err.textContent = tt('请给任务起个名字。'); return; }
     const mode = $('#t-mode').value, downMin = Math.max(1, Math.round(Number($('#t-down').value) || 25));
-    const g = L.GROUPS.find(q => q.id === m.task.group), per = g.period, now = Date.now(), grace = S.created === S.today.key;
-    const cond = per === 'once' ? {} : { manual: $('#t-manual').checked, threshold: Math.max(1, Math.round(Number($('#t-th').value) || 10)), target: Math.max(1, Math.round(Number($('#t-tg').value) || 1)) };
-    const strict = (g.id === 'daily' || g.id === 'weekly') && !grace;
-    const nextKey = per === 'day' ? L.nextDayKey(now) : L.nextWeekKey(now);
+    const g = L.GROUPS.find(q => q.id === m.task.group), now = Date.now();
+    const startDate = ($('#t-start') || {}).value || null, endDate = ($('#t-end') || {}).value || null;
+    if (startDate && endDate && endDate < startDate) { err.textContent = tt('结束日期不能早于开始日期。'); return; }
+    const fields = { name, mode, downMin, manual: $('#t-manual').checked, threshold: Math.max(1, Math.round(Number($('#t-th').value) || 10)), target: Math.max(1, Math.round(Number($('#t-tg').value) || 1)), startDate, endDate };
+    const w = readWhen(err); if (!w) return;
+    if (!m.id && (g.id === 'daily' || g.id === 'weekly') && S.tasks.filter(x => x.group === g.id && !L.isEnded(S, x)).length + (S.scheduled || []).filter(q => q.type === 'task-add' && q.data.group === g.id).length >= 6) { err.textContent = tt('「') + tt(g.name) + tt('」最多放 6 个任务。任务少一点，更容易全部完成。'); return; }
     const u = begin((m.id ? tt('修改任务：') : tt('添加任务：')) + name);
-    if (!m.id) {
-      if ((g.id === 'daily' || g.id === 'weekly') && S.tasks.filter(x => x.group === g.id && !x.endAt).length >= 6) { err.textContent = tt('「') + tt(g.name) + tt('」最多放 6 个任务。任务少一点，更容易全部完成。'); return; }
-      S.seq = (S.seq || 0) + 1;
-      S.tasks.push(L.newTask('t' + S.seq, name, g.id, Object.assign({ mode, downMin, activeFrom: strict ? nextKey : null }, cond)));
-    } else {
-      const x = S.tasks.find(q => q.id === m.id); if (!x) { closeModal(); return; }
-      x.name = name; x.mode = mode; x.downMin = downMin;
-      if (per !== 'once') {
-        const changed = cond.manual !== x.manual || cond.threshold !== x.threshold || cond.target !== x.target;
-        if (strict && L.isActive(S, x)) x.pending = changed ? Object.assign({ from: nextKey }, cond) : x.pending;
-        else Object.assign(x, cond);
-      }
+    if (w.at) {
+      if (m.id) L.schedule(S, w.at, 'task-edit', { id: m.id, fields }, now);
+      else L.schedule(S, w.at, 'task-add', Object.assign({ group: g.id }, fields), now);
+      S.undo = u; save(); closeModal(); toastUndo(queuedNote(w.at)); return;
     }
+    if (!m.id) { S.seq = (S.seq || 0) + 1; S.tasks.push(L.newTask('t' + S.seq, name, g.id, fields)); }
+    else { const x = S.tasks.find(q => q.id === m.id); if (!x) { closeModal(); return; } Object.assign(x, fields); }
     const ev = L.settle(S); logAppend(ev); celebrate(ev);
     S.undo = u; save(); closeModal();
   }
   function deleteTask() {
     const m = modal, x = S.tasks.find(q => q.id === m.id); if (!x) { closeModal(); return; }
-    const g = L.groupOf(x), strict = (g.id === 'daily' || g.id === 'weekly') && S.created !== S.today.key && L.isActive(S, x);
-    const next = g.period === 'day' ? tt('明天') : tt('下周');
-    confirmBox(tt('删除「') + esc(x.name) + tt('」？'), strict ? tt('它会保留到这个周期结束，') + next + tt('起不再出现。已经记录的学习时间不受影响。') : tt('已经记录的学习时间和奖励不受影响。'), tt('删除'), () => {
+    confirmBox(tt('删除「') + esc(x.name) + tt('」？'), tt('已经记录的学习时间和奖励不受影响。') + whenHtml() + '<p class="small" id="merr" style="margin:0;color:var(--warn)"></p>', tt('删除'), w => {
+      if (w && w.at) { act(tt('删除任务：') + x.name, () => L.schedule(S, w.at, 'task-del', { id: x.id }, Date.now())); save(); render(); toastUndo(queuedNote(w.at)); return; }
       const ev = act(tt('删除任务：') + x.name, () => {
-        if (strict) x.endAt = g.period === 'day' ? L.nextDayKey(Date.now()) : L.nextWeekKey(Date.now());
-        else S.tasks = S.tasks.filter(q => q.id !== x.id);
+        S.tasks = S.tasks.filter(q => q.id !== x.id);
         const e = L.settle(S); logAppend(e); return e;
       });
       celebrate(ev); save(); render();
@@ -1151,7 +1203,7 @@
     },
     collapse: el => { collapsed[el.dataset.g] = !collapsed[el.dataset.g]; renderMain(); },
     add: el => { modal = { type: 'task', id: null, task: L.newTask('', '', el.dataset.g) }; renderLayer(); const n = $('#t-name'); if (n) n.focus(); },
-    edit: el => { const x = S.tasks.find(q => q.id === el.dataset.id); if (!x) return; const view = Object.assign({}, x, x.pending || {}); modal = { type: 'task', id: x.id, task: view }; renderLayer(); },
+    edit: el => { const x = S.tasks.find(q => q.id === el.dataset.id); if (!x) return; const view = Object.assign({}, x); modal = { type: 'task', id: x.id, task: view }; renderLayer(); },
     deduct: () => { modal = { type: 'deduct' }; renderLayer(); const n = $('#ded'); if (n) n.focus(); },
     'ov-open': () => { overlayOpen = true; renderLayer(); },
     'ov-close': () => { overlayOpen = false; renderLayer(); },
@@ -1177,7 +1229,8 @@
     },
     'sp-del': el => {
       const g = S.specials.find(x => x.id === el.dataset.id); if (!g) return;
-      confirmBox(tt('删除这个特别任务？'), tt('「') + esc(g.name || g.items.map(x => x.name).join(tt('、'))) + tt('」会从列表里拿掉。已经领到的奖励不会收回。'), tt('删除'), () => {
+      confirmBox(tt('删除这个特别任务？'), tt('「') + esc(g.name || g.items.map(x => x.name).join(tt('、'))) + tt('」会从列表里拿掉。已经领到的奖励不会收回。') + whenHtml() + '<p class="small" id="merr" style="margin:0;color:var(--warn)"></p>', tt('删除'), w => {
+        if (w && w.at) { act(tt('删除特别任务'), () => L.schedule(S, w.at, 'sp-del', { gid: g.id }, Date.now())); save(); renderMain(); toastUndo(queuedNote(w.at)); return; }
         act(tt('删除特别任务'), () => { S.specials = S.specials.filter(x => x.id !== g.id); }); save(); renderMain(); toastUndo(tt('已删除。'));
       });
     },
@@ -1191,7 +1244,7 @@
     'stat-tip': el => { stat.tip = el.dataset.tip; const t = $('#stattip'); if (t) t.textContent = stat.tip; },
     'save-settings': saveSettings,
     'reset-settings': () => { const d = L.defaultSettings(); FIELDS.forEach(f => { $('#set-' + f[0]).value = d[f[0]]; }); d.pool.forEach((p, i) => { $('#pool-p-' + i).value = p.p; $('#pool-m-' + i).value = p.m; }); $('#seterr').textContent = tt('已填回默认值，点保存设置后才会生效。'); },
-    'cancel-pending': () => { S.pendingSettings = null; save(); renderMain(); },
+    'q-cancel': el => { act(tt('取消排队的修改'), () => L.cancelScheduled(S, el.dataset.id)); save(); renderMain(); toastUndo(tt('已取消这条修改。')); },
     export: exportBackup,
     lang: el => { if (el.dataset.l !== window.LANG) window.setLang(el.dataset.l); },
     'gh-save': ghSave,
@@ -1201,7 +1254,7 @@
     poke: el => { el.classList.remove('hop'); void el.offsetWidth; el.classList.add('hop'); try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {} el.addEventListener('animationend', () => el.classList.remove('hop'), { once: true }); },
     mate: el => { const m = MATES[Number(el.dataset.n)]; if (m) toast('<b style="font-family:var(--display)">' + m.name + tt('</b>　') + esc(anyLine(m.idle.concat(m.go))), 5000); },
     'm-scrim': (el, e) => { if (e.target === el) closeModal(); },
-    'm-ok': () => { const fn = modal.fn; modal = null; renderLayer(); fn(); },
+    'm-ok': () => { const fn = modal.fn; let w = null; if (document.querySelector('#layer input[name="when"]')) { w = readWhen($('#merr')); if (!w) return; } modal = null; renderLayer(); fn(w); },
     'm-adjust': () => { const v = Math.max(0, Math.round(Number($('#adj').value) || 0)); modal = null; finishTimer(v * 60); renderLayer(); },
     'm-deduct': () => {
       const v = Math.round(Number($('#ded').value));

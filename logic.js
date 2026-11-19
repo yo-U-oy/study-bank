@@ -35,7 +35,7 @@
   function newTask(id, name, group, extra) {
     return Object.assign({
       id, name, group, mode: 'up', downMin: 25, target: 1, threshold: 10,
-      manual: false, activeFrom: null, endAt: null, pending: null, totalSec: 0,
+      manual: false, startDate: null, endDate: null, totalSec: 0,
     }, extra || {});
   }
 
@@ -51,9 +51,9 @@
       ['非必要任务 A', 'extra'],
     ];
     const st = {
-      v: 6, specials: [], created: dayKey(now), bank: 55, tickets: 0, pity: 0, seq: names.length,
+      v: 7, specials: [], scheduled: [], created: dayKey(now), bank: 55, tickets: 0, pity: 0, seq: names.length,
       tasks: names.map((n, i) => newTask('t' + (i + 1), n[0], n[1])),
-      settings: defaultSettings(), pendingSettings: null, timer: null,
+      settings: defaultSettings(), timer: null,
       today: freshDay(dayKey(now)), week: freshWeek(weekKey(now)),
     };
     newSpecial(st, { items: [{ name: '完成一件今天想做的事', tix: 1 }] }, now);
@@ -67,11 +67,12 @@
     return p === 'day' ? state.today : p === 'week' ? state.week : null;
   }
 
+  // 任务只在开始日期到结束日期之间算数（都不填就一直算）
   function isActive(state, task) {
-    const per = periodOf(state, task);
-    if (!per || !task.activeFrom) return true;
-    return task.activeFrom <= per.key;
+    const today = state.today.key;
+    return (!task.startDate || task.startDate <= today) && (!task.endDate || task.endDate >= today);
   }
+  function isEnded(state, task) { return !!task.endDate && task.endDate < state.today.key; }
 
   function taskSec(state, task) {
     const per = periodOf(state, task);
@@ -87,26 +88,45 @@
   }
   function taskDone(state, task) { return taskCount(state, task) >= Math.max(1, task.target || 1); }
 
-  // 换日 / 换周：重置进度，让延后的修改生效
+  // 换日 / 换周：重置进度，然后执行到期的"准备生效"修改
   function rollover(state, now) {
     let changed = false;
     const dk = dayKey(now), wk = weekKey(now);
-    const applyFor = (groupId, key) => {
-      state.tasks = state.tasks.filter(t => !(t.group === groupId && t.endAt && t.endAt <= key));
-      state.tasks.forEach(t => {
-        if (t.group === groupId && t.pending && t.pending.from <= key) {
-          const p = t.pending; t.pending = null;
-          ['threshold', 'target', 'manual'].forEach(f => { if (p[f] !== undefined) t[f] = p[f]; });
-        }
-      });
-    };
-    if (state.today.key !== dk) { state.today = freshDay(dk); applyFor('daily', dk); changed = true; }
-    if (state.week.key !== wk) {
-      state.week = freshWeek(wk); applyFor('weekly', wk); applyFor('extra', wk);
-      if (state.pendingSettings) { state.settings = state.pendingSettings; state.pendingSettings = null; }
-      changed = true;
-    }
+    if (state.today.key !== dk) { state.today = freshDay(dk); changed = true; }
+    if (state.week.key !== wk) { state.week = freshWeek(wk); changed = true; }
+    if (applyScheduled(state, now)) changed = true;
     return changed;
+  }
+
+  // ---------- 准备生效的修改（排队）----------
+  // 每一条：{ id, at: 'YYYY-MM-DD'（那天 4:00 生效）, type, data, made }
+  // type：settings / task-add / task-edit / task-del / sp-add / sp-edit / sp-del。可以排好几条，按日期先后执行
+  const TASK_FIELDS = ['name', 'mode', 'downMin', 'manual', 'threshold', 'target', 'startDate', 'endDate'];
+  function schedule(state, at, type, data, now) {
+    if (!Array.isArray(state.scheduled)) state.scheduled = [];
+    state.seq = (state.seq || 0) + 1;
+    const q = { id: 'q' + state.seq, at, type, data: JSON.parse(JSON.stringify(data)), made: dayKey(now) };
+    state.scheduled.push(q); return q;
+  }
+  function cancelScheduled(state, id) { state.scheduled = (state.scheduled || []).filter(q => q.id !== id); }
+  function applyOne(state, q, now) {
+    const d = q.data;
+    if (q.type === 'settings') state.settings = d.settings;
+    else if (q.type === 'task-add') { state.seq = (state.seq || 0) + 1; state.tasks.push(newTask('t' + state.seq, d.name, d.group, pickFields(d))); }
+    else if (q.type === 'task-edit') { const t = state.tasks.find(x => x.id === d.id); if (t) Object.assign(t, pickFields(d.fields)); }
+    else if (q.type === 'task-del') state.tasks = state.tasks.filter(x => x.id !== d.id);
+    else if (q.type === 'sp-add') newSpecial(state, d.spec, now);
+    else if (q.type === 'sp-edit') updateSpecial(state, d.gid, d.spec, now);
+    else if (q.type === 'sp-del') state.specials = (state.specials || []).filter(x => x.id !== d.gid);
+  }
+  function pickFields(o) { const r = {}; TASK_FIELDS.forEach(f => { if (o[f] !== undefined) r[f] = o[f]; }); return r; }
+  function applyScheduled(state, now) {
+    const today = dayKey(now), list = state.scheduled || [];
+    const due = list.filter(q => q.at <= today).sort((a, b) => a.at < b.at ? -1 : a.at > b.at ? 1 : (parseInt(a.id.slice(1), 10) - parseInt(b.id.slice(1), 10)));
+    if (!due.length) return false;
+    state.scheduled = list.filter(q => q.at > today);
+    due.forEach(q => applyOne(state, q, now));
+    return true;
   }
 
   function addStudy(state, taskId, sec) {
@@ -199,21 +219,37 @@
 
   // 旧数据升级到第 2 版规则：每 30 分钟只发 1 张券；每日任务全部完成才发 1 张券
   function migrate(state) {
-    const v = state.v || 1; if (v >= 6) return false;
+    const v = state.v || 1; if (v >= 7) return false;
+    if (v < 6) migrateTo6(state, v);
+    // 第 7 版：所有延后生效的修改改成排队；任务有开始 / 结束日期
+    const now = Date.now();
+    if (!Array.isArray(state.scheduled)) state.scheduled = [];
+    if (state.pendingSettings) schedule(state, nextWeekKey(now), 'settings', { settings: state.pendingSettings }, now);
+    delete state.pendingSettings;
+    (state.tasks || []).forEach(t => {
+      if (t.pending) { const p = t.pending; schedule(state, p.from || nextDayKey(now), 'task-edit', { id: t.id, fields: pickFields(p) }, now); }
+      if (t.endAt) schedule(state, t.endAt, 'task-del', { id: t.id }, now);
+      t.startDate = t.activeFrom && t.activeFrom > dayKey(now) ? t.activeFrom : (t.startDate || null);
+      if (t.endDate === undefined) t.endDate = null;
+      delete t.pending; delete t.endAt; delete t.activeFrom;
+    });
+    state.v = 7; return true;
+  }
+  function migrateTo6(state, v) {
     if (!Array.isArray(state.specials)) state.specials = []; // 第 5 版：特别任务
     // 第 6 版：临时任务并入特别任务（保留已学时间，奖励沿用原来的券数）
     const temps = (state.tasks || []).filter(t => t.group === 'temp');
     temps.forEach(t => newSpecial(state, { items: [{ name: t.name, tix: (state.settings && state.settings.tempTickets) || 1, sec: t.totalSec || 0 }] }, Date.now()));
     state.tasks = (state.tasks || []).filter(t => t.group !== 'temp');
     if (state.timer && temps.some(t => t.id === state.timer.taskId)) { const g = state.specials[state.specials.length - temps.length + temps.findIndex(t => t.id === state.timer.taskId)]; state.timer.taskId = g.items[0].id; }
-    if (v >= 4) { state.v = 6; return true; }
+    if (v >= 4) { state.v = 6; return; }
     [state.settings, state.pendingSettings].forEach(s => {
       if (!s) return;
       if (v < 2) { s.segReward = 0; s.dailyTaskTickets = 0; s.dailyAllMin = 0; s.dailyAllTickets = 1; }
       if (v < 3) { s.weeklyAllMin = 0; s.weeklyAllTickets = 5; } // 第 3 版：每周全清改为 5 张券
       s.segCap = 0; s.bankCapMin = 2880; // 第 4 版：时长券不设上限，余额最多 48 小时
     });
-    state.v = 6; return true;
+    state.v = 6;
   }
 
   // ---------- 特别任务：自己设的一次性任务，手动确认完成后直接发奖励 ----------
@@ -294,6 +330,6 @@
     return g;
   }
 
-  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward, updateSpecial };
+  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward, updateSpecial, isEnded, schedule, cancelScheduled, applyScheduled };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Logic = api;
 })(typeof window !== 'undefined' ? window : globalThis);

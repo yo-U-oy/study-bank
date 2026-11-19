@@ -324,6 +324,15 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @keyframes slideok{0%{box-shadow:0 0 0 rgba(240,211,142,0)}40%{box-shadow:0 0 40px rgba(240,211,142,.8)}100%{box-shadow:0 0 0 rgba(240,211,142,0)}}
 @keyframes shine{from{background-position:100% 0}to{background-position:0 0}}
 .cheer .ctier.tA{color:var(--brass-hi);text-shadow:0 0 18px rgba(240,211,142,.6)}
+/* 生效时间选择、排队列表 */
+.when{border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin:0;display:flex;flex-direction:column;gap:8px}
+.when legend{padding:0 6px;font-size:13px;color:var(--brass);font-family:var(--display)}
+.whenopts{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center}
+.whenopts .check{margin:0}
+.whenopts input[type=date]{background:#0f0c0a;border:1px solid var(--line);border-radius:4px;padding:6px 10px;color:var(--text);min-height:38px}
+.qrow{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px dashed rgba(122,95,54,.45)}
+.qrow:first-of-type{border-top:0}
+.qadd{margin:0 0 0 16px;padding:6px 0;border-left:2px dashed var(--line);padding-left:10px}
 /* 学习页两页切换：日常任务 / 特别任务 */
 .pagetabs{display:flex;width:100%;margin:2px 0 -2px}
 .pagetabs button{flex:1;position:relative}

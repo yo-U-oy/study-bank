@@ -201,4 +201,18 @@ window.I18N_EN = {
   '读取不到数据': 'Cannot read your data', '请检查网络并确认已经登录，然后重新打开这个页面。你的数据仍然保存在云端。': 'Please check your network and that you are logged in, then reopen this page. Your data is still saved in the cloud.',
   '找到了你已有的数据，已经直接读取。': 'Found your existing data and loaded it.', '暂时连不上云端，请稍后再点一次。': 'Cannot reach the cloud right now. Please tap again later.',
   '银行开好了，里面有 55 分钟。': 'Your bank is open, with 55 minutes inside.',
+  // 生效时间、排队
+  '什么时候生效？': 'When should this take effect?', '立即': 'Now', '下周一': 'Next Monday', '（': ' (', '选日期': 'Pick a date', '生效日期': 'Effective date',
+  '选以后的日子，修改会先排队，到那天凌晨 4:00 自动生效。': 'If you pick a later day, the change waits in line and takes effect at 4:00 that morning.',
+  '请选一个明天或以后的日期。': 'Please pick tomorrow or a later date.',
+  '已删除的任务': 'a deleted task', '已删除的特别任务': 'a deleted special task', '修改奖励数值和奖池': 'Change reward values and prize pool',
+  '新建特别任务：': 'New special task: ', '删除特别任务：': 'Delete special task: ',
+  '准备生效的修改': 'Upcoming changes', '到了日期的凌晨 4:00 自动生效。不想要了可以取消。': 'Each takes effect at 4:00 on its date. Cancel any you no longer want.',
+  '已排好，#凌晨 4:00 生效。': 'Scheduled. Takes effect # at 4:00.', '# 修改': 'Changes #', '# 删除': 'Removed #', '# 加入：': 'Joins #: ', '到#结束': 'Until #',
+  '下面是现在正在用的数值。保存时可以选择立即生效，或者排到以后的日子。': 'These are the values in use now. When saving, you can apply them now or schedule them for a later day.',
+  '有 # 个数值修改在排队，见上面「准备生效的修改」。': '# value change(s) are waiting; see "Upcoming changes" above.',
+  '开始日期（可不填）': 'Start date (optional)', '结束日期（可不填）': 'End date (optional)',
+  '填了日期，任务只在这段时间里显示和计算奖励；不填就一直有效。': 'With dates, the task only shows and earns rewards within that range. Without dates, it is always active.',
+  '结束日期不能早于开始日期。': 'The end date cannot be before the start date.',
+  '取消排队的修改': 'Cancel scheduled change', '已取消这条修改。': 'That change was cancelled.',
 };

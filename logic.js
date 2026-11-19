@@ -1,0 +1,278 @@
+/* 学习抽卡银行：纯逻辑（不碰页面），页面和测试共用 */
+(function (root) {
+  const DAY = 86400000;
+  const GROUPS = [
+    { id: 'daily', name: '每日', period: 'day' },
+    { id: 'weekly', name: '每周', period: 'week' },
+    { id: 'extra', name: '非必要', period: 'week' },
+  ];
+
+  // 一天从东京时间 4:00 开始；一周从周一 4:00 开始
+  function dayKey(ms) { return new Date(ms + 5 * 3600e3).toISOString().slice(0, 10); }
+  function weekKey(ms) {
+    const d = new Date(ms + 5 * 3600e3);
+    const dow = (d.getUTCDay() + 6) % 7;
+    return new Date(d.getTime() - dow * DAY).toISOString().slice(0, 10);
+  }
+  function nextDayKey(ms) { return dayKey(ms + DAY); }
+  function nextWeekKey(ms) { return weekKey(ms + 7 * DAY); }
+
+  function defaultSettings() {
+    return {
+      segMin: 30, segReward: 0, segTickets: 1, segCap: 0, bankCapMin: 2880,
+      startMin: 10, startTickets: 1,
+      dailyTaskTickets: 0, dailyAllMin: 0, dailyAllTickets: 1,
+      weeklyAllMin: 0, weeklyAllTickets: 5,
+      tempTickets: 1, tempMinMin: 10,
+      pityN: 10, critPct: 5, roundTo: 5,
+      pool: [
+        { k: 'S', p: 2, m: 120 }, { k: 'A', p: 8, m: 60 }, { k: 'B', p: 20, m: 30 },
+        { k: 'C', p: 30, m: 15 }, { k: 'D', p: 40, m: 10 },
+      ],
+    };
+  }
+
+  function newTask(id, name, group, extra) {
+    return Object.assign({
+      id, name, group, mode: 'up', downMin: 25, target: 1, threshold: 10,
+      manual: false, activeFrom: null, endAt: null, pending: null, totalSec: 0,
+    }, extra || {});
+  }
+
+  function freshDay(key) {
+    return { key, totalSec: 0, segs: 0, start: false, taskSec: {}, manual: {}, rewarded: {}, allBonus: false, tempReward: false };
+  }
+  function freshWeek(key) { return { key, taskSec: {}, manual: {}, bonus: false }; }
+
+  function initialState(now) {
+    const names = [
+      ['每日任务 A', 'daily'], ['每日任务 B', 'daily'],
+      ['每周任务 A', 'weekly'], ['每周任务 B', 'weekly'],
+      ['非必要任务 A', 'extra'],
+    ];
+    const st = {
+      v: 6, specials: [], created: dayKey(now), bank: 55, tickets: 0, pity: 0, seq: names.length,
+      tasks: names.map((n, i) => newTask('t' + (i + 1), n[0], n[1])),
+      settings: defaultSettings(), pendingSettings: null, timer: null,
+      today: freshDay(dayKey(now)), week: freshWeek(weekKey(now)),
+    };
+    newSpecial(st, { items: [{ name: '完成一件今天想做的事', tix: 1 }] }, now);
+    return st;
+  }
+
+  function groupOf(task) { return GROUPS.find(g => g.id === task.group) || GROUPS.find(g => g.id === 'extra'); }
+
+  function periodOf(state, task) {
+    const p = groupOf(task).period;
+    return p === 'day' ? state.today : p === 'week' ? state.week : null;
+  }
+
+  function isActive(state, task) {
+    const per = periodOf(state, task);
+    if (!per || !task.activeFrom) return true;
+    return task.activeFrom <= per.key;
+  }
+
+  function taskSec(state, task) {
+    const per = periodOf(state, task);
+    return per ? (per.taskSec[task.id] || 0) : (task.totalSec || 0);
+  }
+
+  function taskCount(state, task) {
+    const per = periodOf(state, task);
+    const target = Math.max(1, task.target || 1);
+    if (!per) return 0;
+    if (task.manual) return Math.min(target, per.manual[task.id] || 0);
+    return Math.min(target, Math.floor(taskSec(state, task) / (Math.max(1, task.threshold) * 60)));
+  }
+  function taskDone(state, task) { return taskCount(state, task) >= Math.max(1, task.target || 1); }
+
+  // 换日 / 换周：重置进度，让延后的修改生效
+  function rollover(state, now) {
+    let changed = false;
+    const dk = dayKey(now), wk = weekKey(now);
+    const applyFor = (groupId, key) => {
+      state.tasks = state.tasks.filter(t => !(t.group === groupId && t.endAt && t.endAt <= key));
+      state.tasks.forEach(t => {
+        if (t.group === groupId && t.pending && t.pending.from <= key) {
+          const p = t.pending; t.pending = null;
+          ['threshold', 'target', 'manual'].forEach(f => { if (p[f] !== undefined) t[f] = p[f]; });
+        }
+      });
+    };
+    if (state.today.key !== dk) { state.today = freshDay(dk); applyFor('daily', dk); changed = true; }
+    if (state.week.key !== wk) {
+      state.week = freshWeek(wk); applyFor('weekly', wk); applyFor('extra', wk);
+      if (state.pendingSettings) { state.settings = state.pendingSettings; state.pendingSettings = null; }
+      changed = true;
+    }
+    return changed;
+  }
+
+  function addStudy(state, taskId, sec) {
+    if (sec <= 0) return;
+    state.today.totalSec += sec;
+    const t = state.tasks.find(x => x.id === taskId);
+    if (!t) { const it = findSpecialItem(state, taskId); if (it) it.sec = (it.sec || 0) + sec; return; }
+    const per = periodOf(state, t);
+    if (per) per.taskSec[t.id] = (per.taskSec[t.id] || 0) + sec;
+    else t.totalSec = (t.totalSec || 0) + sec;
+  }
+
+  // 余额上限（0 为不限）：还能再存多少分钟
+  function bankRoom(state) { const cap = state.settings.bankCapMin || 0; return cap > 0 ? Math.max(0, cap - state.bank) : Infinity; }
+  function give(state, events, label, min, tix) {
+    min = Math.min(min, bankRoom(state));
+    if (!min && !tix) return;
+    state.bank += min; state.tickets += tix;
+    events.push({ label, min, tix });
+  }
+
+  // 根据当前累计进度补发所有应得奖励（可重复调用，不会重复发）
+  function settle(state) {
+    const s = state.settings, d = state.today, w = state.week, ev = [];
+    const raw = Math.floor(d.totalSec / (s.segMin * 60)), segs = s.segCap > 0 ? Math.min(s.segCap, raw) : raw;
+    while (d.segs < segs) { d.segs++; give(state, ev, '学习满 ' + s.segMin + ' 分钟（今日第 ' + d.segs + ' 张时长券）', s.segReward, s.segTickets); }
+    if (!d.start && d.totalSec >= s.startMin * 60) { d.start = true; give(state, ev, '启动奖：今天开始学习了', 0, s.startTickets); }
+
+    const daily = state.tasks.filter(t => t.group === 'daily' && isActive(state, t));
+    daily.forEach(t => {
+      if (!d.rewarded[t.id] && taskDone(state, t)) { d.rewarded[t.id] = true; give(state, ev, '每日任务完成：' + t.name, 0, s.dailyTaskTickets); }
+    });
+    if (!d.allBonus && daily.length && daily.every(t => taskDone(state, t))) { d.allBonus = true; give(state, ev, '每日任务全部完成', s.dailyAllMin, s.dailyAllTickets || 0); }
+
+    const weekly = state.tasks.filter(t => t.group === 'weekly' && isActive(state, t));
+    if (!w.bonus && weekly.length && weekly.every(t => taskDone(state, t))) { w.bonus = true; give(state, ev, '每周任务全部完成', s.weeklyAllMin, s.weeklyAllTickets); }
+    return ev;
+  }
+
+  function manualCheck(state, taskId) {
+    const t = state.tasks.find(x => x.id === taskId);
+    const per = t && periodOf(state, t);
+    if (!t || !per || !t.manual) return [];
+    per.manual[t.id] = Math.min(Math.max(1, t.target), (per.manual[t.id] || 0) + 1);
+    return settle(state);
+  }
+
+  function completeTemp(state, taskId) {
+    const t = state.tasks.find(x => x.id === taskId), s = state.settings, ev = [];
+    if (!t || t.group !== 'temp') return ev;
+    if (!state.today.tempReward && (t.totalSec || 0) >= s.tempMinMin * 60) {
+      state.today.tempReward = true; give(state, ev, '临时任务完成：' + t.name, 0, s.tempTickets);
+    }
+    state.tasks = state.tasks.filter(x => x.id !== taskId);
+    return ev;
+  }
+
+  function draw(state, rng) {
+    const s = state.settings, pool = s.pool;
+    if (state.tickets <= 0 || bankRoom(state) <= 0) return null;
+    let idx, pity = false;
+    if (state.pity >= s.pityN - 1) { idx = 1; pity = true; }
+    else {
+      const r = rng() * 100; let acc = 0; idx = pool.length - 1;
+      for (let i = 0; i < pool.length; i++) { acc += pool[i].p; if (r < acc) { idx = i; break; } }
+    }
+    const crit = rng() * 100 < s.critPct;
+    state.pity = idx <= 1 ? 0 : state.pity + 1;
+    const min = pool[idx].m * (crit ? 2 : 1), got = Math.min(min, bankRoom(state));
+    state.tickets--; state.bank += got;
+    return { k: pool[idx].k, idx, min, got, crit, pity };
+  }
+
+  function playCost(sec, roundTo) { return sec < 60 ? 0 : Math.ceil(sec / 60 / roundTo) * roundTo; }
+  function spend(state, min) { const a = Math.max(0, Math.round(min)); state.bank -= a; return a; } // 允许变成负数（欠账），之后的奖励先还账
+
+  function elapsedSec(timer, now) {
+    return Math.max(0, Math.floor((timer.acc + (timer.paused ? 0 : now - timer.startedAt)) / 1000));
+  }
+
+  function settingsError(s) {
+    const sum = s.pool.reduce((a, b) => a + Number(b.p), 0);
+    if (Math.abs(sum - 100) > 1e-9) return '各奖项概率加起来是 ' + sum + '%，需要正好 100%。';
+    const nums = ['segMin', 'segReward', 'segTickets', 'segCap', 'bankCapMin', 'startMin', 'startTickets', 'dailyTaskTickets', 'dailyAllMin', 'dailyAllTickets', 'weeklyAllMin', 'weeklyAllTickets', 'tempTickets', 'tempMinMin', 'pityN', 'critPct', 'roundTo'];
+    for (const k of nums) if (!(Number.isFinite(s[k]) && s[k] >= 0)) return '有一项数值为空或为负数，请检查。';
+    if (s.segMin < 1 || s.pityN < 2 || s.roundTo < 1 || s.startMin < 1) return '每段分钟数、启动分钟数、取整分钟数至少为 1，保底抽数至少为 2。';
+    if (s.pool.some(x => !(x.p >= 0) || !(x.m >= 0))) return '奖项的概率和分钟数不能为负数。';
+    return null;
+  }
+
+  // 旧数据升级到第 2 版规则：每 30 分钟只发 1 张券；每日任务全部完成才发 1 张券
+  function migrate(state) {
+    const v = state.v || 1; if (v >= 6) return false;
+    if (!Array.isArray(state.specials)) state.specials = []; // 第 5 版：特别任务
+    // 第 6 版：临时任务并入特别任务（保留已学时间，奖励沿用原来的券数）
+    const temps = (state.tasks || []).filter(t => t.group === 'temp');
+    temps.forEach(t => newSpecial(state, { items: [{ name: t.name, tix: (state.settings && state.settings.tempTickets) || 1, sec: t.totalSec || 0 }] }, Date.now()));
+    state.tasks = (state.tasks || []).filter(t => t.group !== 'temp');
+    if (state.timer && temps.some(t => t.id === state.timer.taskId)) { const g = state.specials[state.specials.length - temps.length + temps.findIndex(t => t.id === state.timer.taskId)]; state.timer.taskId = g.items[0].id; }
+    if (v >= 4) { state.v = 6; return true; }
+    [state.settings, state.pendingSettings].forEach(s => {
+      if (!s) return;
+      if (v < 2) { s.segReward = 0; s.dailyTaskTickets = 0; s.dailyAllMin = 0; s.dailyAllTickets = 1; }
+      if (v < 3) { s.weeklyAllMin = 0; s.weeklyAllTickets = 5; } // 第 3 版：每周全清改为 5 张券
+      s.segCap = 0; s.bankCapMin = 2880; // 第 4 版：时长券不设上限，余额最多 48 小时
+    });
+    state.v = 6; return true;
+  }
+
+  // ---------- 特别任务：自己设的一次性任务，手动确认完成后直接发奖励 ----------
+  // 结构：{ id, name, date|null, bonusMin, bonusTix, bonusDone, created, items: [{ id, name, min, tix, cond, done, doneAt }] }
+  function newSpecial(state, spec, now) {
+    state.seq = (state.seq || 0) + 1;
+    const g = { id: 's' + state.seq, name: spec.name || '', date: spec.date || null, repeat: spec.repeat || null, bonusMin: spec.bonusMin || 0, bonusTix: spec.bonusTix || 0, bonusDone: false, bonusDay: null, created: dayKey(now), items: [] };
+    if (g.repeat === 'gap') { g.gapDays = spec.gapDays || 3; g.gapMin = spec.gapMin || 0; g.gapTix = spec.gapTix || 0; g.lastDay = null; }
+    spec.items.forEach((it, i) => g.items.push({ id: g.id + '-' + (i + 1), name: it.name, min: it.min || 0, tix: it.tix || 0, cond: it.cond || '', sec: it.sec || 0, done: false, doneAt: null }));
+    if (!Array.isArray(state.specials)) state.specials = [];
+    state.specials.push(g); return g;
+  }
+  // 显示规则：有日期的显示到当天结束；没日期的显示到全部完成后的那一天结束。过期不扣任何东西
+  function findSpecialItem(state, id) {
+    for (const g of state.specials || []) { const it = g.items.find(x => x.id === id); if (it) return it; }
+    return null;
+  }
+  // 每天重复的特别任务：date 表示从哪天开始，完成状态按天记（doneDay），第二天自动重新出现
+  // 重复类特别任务有两种：'daily' 每天一次；'gap' 也是每天最多一次，但奖励按"距上次完成隔了几天"分档：在 gapDays 天之内再次完成拿高档，超过了拿基本档
+  function perDay(g) { return g.repeat === 'daily' || g.repeat === 'gap'; }
+  function specialDone(g, it, now) { return perDay(g) ? it.doneDay === dayKey(now) : !!it.done; }
+  function specialStarted(g, now) { return !perDay(g) || !g.date || g.date <= dayKey(now); }
+  function specialVisible(g, now) {
+    const today = dayKey(now);
+    if (perDay(g)) return true;
+    if (g.date) return g.date >= today;
+    if (!g.items.every(x => x.done)) return true;
+    const last = Math.max(...g.items.map(x => x.doneAt || 0));
+    return dayKey(last) >= today;
+  }
+  // 距上次完成过了几天；还没完成过返回 null
+  function specialGap(g, now) {
+    if (!g.lastDay) return null;
+    return Math.round((Date.parse(dayKey(now)) - Date.parse(g.lastDay)) / DAY);
+  }
+  // 这一次完成能拿到的奖励：'gap' 任务里，距上次不超过 gapDays 天（或第一次）拿高档，否则拿基本档
+  function specialReward(g, it, now) {
+    if (g.repeat === 'gap') {
+      const gap = specialGap(g, now);
+      if (gap === null || gap <= (g.gapDays || 0)) return { min: g.gapMin || 0, tix: g.gapTix || 0 };
+    }
+    return { min: it.min || 0, tix: it.tix || 0 };
+  }
+  function completeSpecial(state, gid, iid, now) {
+    const ev = [], g = (state.specials || []).find(x => x.id === gid); if (!g) return ev;
+    const it = g.items.find(x => x.id === iid); if (!it || specialDone(g, it, now) || !specialStarted(g, now)) return ev;
+    const r = specialReward(g, it, now);
+    if (perDay(g)) it.doneDay = dayKey(now); else it.done = true;
+    if (g.repeat === 'gap') g.lastDay = dayKey(now);
+    it.doneAt = now;
+    give(state, ev, '特别任务：' + it.name, r.min, r.tix);
+    const bonusTaken = perDay(g) ? g.bonusDay === dayKey(now) : g.bonusDone;
+    if (g.items.length > 1 && !bonusTaken && g.items.every(x => specialDone(g, x, now)) && (g.bonusMin || g.bonusTix)) {
+      if (perDay(g)) g.bonusDay = dayKey(now); else g.bonusDone = true;
+      give(state, ev, '特别任务全部完成' + (g.name ? '：' + g.name : ''), g.bonusMin, g.bonusTix);
+    }
+    return ev;
+  }
+
+  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Logic = api;
+})(typeof window !== 'undefined' ? window : globalThis);

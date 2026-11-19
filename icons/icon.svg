@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="70%"><stop offset="0" stop-color="#3a2a17"/><stop offset=".6" stop-color="#1a1410"/><stop offset="1" stop-color="#0e0c0b"/></radialGradient>
+    <linearGradient id="die" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8a6128"/><stop offset=".55" stop-color="#4a3214"/><stop offset="1" stop-color="#22170a"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <g transform="translate(106 96) scale(3)">
+    <polygon points="50,3 91,26.5 91,73.5 50,97 9,73.5 9,26.5" fill="url(#die)" stroke="#f0d38e" stroke-width="2.2" stroke-linejoin="round"/>
+    <path d="M50 3L50 25M50 25L91 26.5M50 25L9 26.5M77 70L91 26.5M77 70L91 73.5M77 70L50 97M23 70L9 26.5M23 70L9 73.5M23 70L50 97" stroke="rgba(240,211,142,.6)" stroke-width="1.3" fill="none" stroke-linejoin="round"/>
+    <polygon points="50,25 77,70 23,70" fill="rgba(255,236,190,.12)" stroke="#f0d38e" stroke-width="1.6" stroke-linejoin="round"/>
+    <text x="50" y="61" text-anchor="middle" font-family="Georgia,serif" font-weight="900" font-size="21" fill="#fff2cf">20</text>
+  </g>
+</svg>

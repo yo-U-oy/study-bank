@@ -1,0 +1,4 @@
+# 个人数据备份不要提交到仓库
+*backup*.json
+study-bank-data-*.json
+.DS_Store

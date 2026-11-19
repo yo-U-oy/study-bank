@@ -1,0 +1,16 @@
+{
+  "name": "学习抽卡银行",
+  "short_name": "抽卡银行",
+  "description": "学习换游戏时间和抽奖券。只有奖励，没有惩罚。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e0c0b",
+  "theme_color": "#120f0d",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

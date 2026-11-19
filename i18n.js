@@ -48,5 +48,10 @@
     for (const [re, en] of LABELS) if (re.test(s)) return s.replace(re, en);
     return s;
   };
+  // 英文单复数：页面写到屏幕前统一修正（1 ticket / 2 tickets）
+  window.ttPlural = function (html) {
+    if (lang !== 'en' || typeof html !== 'string') return html;
+    return html.replace(/(^|[^\d.,])1 (ticket|draw|day)s\b/g, '$11 $2');
+  };
   window.setLang = function (l) { try { localStorage.setItem('bank-lang', l); } catch (e) { } location.reload(); };
 })();

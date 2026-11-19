@@ -324,13 +324,23 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @keyframes slideok{0%{box-shadow:0 0 0 rgba(240,211,142,0)}40%{box-shadow:0 0 40px rgba(240,211,142,.8)}100%{box-shadow:0 0 0 rgba(240,211,142,0)}}
 @keyframes shine{from{background-position:100% 0}to{background-position:0 0}}
 .cheer .ctier.tA{color:var(--brass-hi);text-shadow:0 0 18px rgba(240,211,142,.6)}
+/* 学习页两页切换：日常任务 / 特别任务 */
+.pagetabs{display:flex;width:100%;margin:2px 0 -2px}
+.pagetabs button{flex:1;position:relative}
+.pagetabs .badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:var(--brass);color:#1b140c;font-size:11px;line-height:18px}
+.pager{display:flex;flex-direction:column;gap:16px;touch-action:pan-y;min-height:22vh}
+.pager.from-right{animation:pageR .22s ease-out}
+.pager.from-left{animation:pageL .22s ease-out}
+@keyframes pageR{from{opacity:0;transform:translateX(36px)}to{opacity:1;transform:none}}
+@keyframes pageL{from{opacity:0;transform:translateX(-36px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.pager.from-right,.pager.from-left{animation:none}}
 /* 英文界面：字距收紧；特别任务一行放不下时，按钮换到下一行 */
 html[lang="en"] h1,html[lang="en"] h2,html[lang="en"] h3{letter-spacing:.02em}
 html[lang="en"] .altar h1{letter-spacing:.08em}
 html[lang="en"] nav.tabs button,html[lang="en"] .who,html[lang="en"] .bank .label,html[lang="en"] .overlay .task{letter-spacing:.04em}
 html[lang="en"] .prize .grade,html[lang="en"] .crit,html[lang="en"] .cheer .ctier{letter-spacing:.06em}
 .spitem{flex-wrap:wrap}
-.spitem>.grow{flex:1 1 60%;min-width:0}
+.spitem>.grow{flex:1 1 9em;min-width:0}
 </style>
 </head>
 <body>

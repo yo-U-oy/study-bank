@@ -10,7 +10,7 @@ window.I18N_EN = {
   '取消': 'Cancel', '保存': 'Save', '删除': 'Delete', '修改': 'Edit', '完成': 'Done', '开始': 'Start', '撤销': 'Undo',
   '关闭': 'Close', '复制': 'Copy', '继续': 'Resume', '暂停': 'Pause', '结束': 'Finish', '放弃': 'Abandon',
   '收起': 'Hide ', '展开': 'Show ', '收下': 'Take it', '正在读取': 'Loading', '未知': 'unknown',
-  '欠': 'Owe', '小时': 'h', '分钟': 'min', '券': 'tickets', '张': '', '张券': 'tickets', '次': '', '天': 'day(s) ago',
+  '欠': 'Owe', '小时': 'h', '分钟': 'min', '券': 'tickets', '张': '', '张券': 'tickets', '次': '', '天': 'days ago',
   '今天': 'Today', '明天': 'tomorrow', '下周': 'next week', '今日': 'Today', '本周': 'This week',
   '每日': 'Daily', '每周': 'Weekly ', '非必要': 'Optional', '每天': 'Daily ',
   '每日任务 A': 'Daily task A', '每日任务 B': 'Daily task B', '每周任务 A': 'Weekly task A', '每周任务 B': 'Weekly task B',
@@ -100,7 +100,7 @@ window.I18N_EN = {
   '勾选：': 'Checked: ',
 
   // 特别任务
-  '特别任务': 'Special Tasks', '还剩': '', '项': 'left', '新建特别任务': 'New special task',
+  '特别任务': 'Special Tasks', '日常任务': 'Routine', '还剩': '', '项': 'left', '新建特别任务': 'New special task',
   '想给自己定一件额外的事？点右边的 + 新建，完成后直接拿奖励。': 'Want to set yourself something extra? Tap + on the right. You get the reward as soon as it is done.',
   '按间隔': 'By interval', '从#开始': 'Starts #',
   '修改这组特别任务': 'Edit this group', '删除这组特别任务': 'Delete this group', '修改这个特别任务': 'Edit this special task', '删除这个特别任务': 'Delete this special task',
@@ -147,7 +147,7 @@ window.I18N_EN = {
   '起不再出现。已经记录的学习时间不受影响。': '. Recorded study time is not affected.', '已经记录的学习时间和奖励不受影响。': 'Recorded study time and rewards are not affected.',
   '删除任务：': 'Delete task: ',
   '今天已经领过临时任务的券了，这次不再发券。': 'You already got today\'s quick-task ticket, so no ticket this time.',
-  '完成后获得': 'Finish to get', '张抽奖券。': 'ticket(s).', '这个任务累计计时还不到': 'This task has less than', '分钟，现在完成不会发券。': 'min timed, so finishing now gives no ticket.',
+  '完成后获得': 'Finish to get', '张抽奖券。': 'tickets.', '这个任务累计计时还不到': 'This task has less than', '分钟，现在完成不会发券。': 'min timed, so finishing now gives no ticket.',
   '完成「': 'Finish "', '完成后它会从列表里移走。': 'It will be removed from the list once done.', '完成临时任务：': 'Quick task done: ',
 
   // 流水、统计

@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.10.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.11.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -15,6 +15,22 @@
   const logView = () => view === 'ledger' || view === 'stats' || (view === 'draw' && !(lastDraw && lastDraw.rolling));
   let stat = { mode: 'week', off: 0, moff: 0, tip: '' };
   let remind = { a: false, b: false, over: 0 }, AC = null;
+  let todayPage = 'routine', pageAnim = '';
+  try { if (localStorage.getItem('bank-today-page') === 'special') todayPage = 'special'; } catch (e) { }
+  function setTodayPage(p) {
+    if (p === todayPage) return;
+    pageAnim = p === 'special' ? 'from-right' : 'from-left'; todayPage = p;
+    try { localStorage.setItem('bank-today-page', p); } catch (e) { }
+    renderMain();
+  }
+  // 在任务区左右滑动切换两页（横向移动明显大于纵向时才算滑动，不影响上下滚动）
+  let swipe0 = null;
+  document.addEventListener('touchstart', e => { const p = e.target.closest && e.target.closest('#pager'); swipe0 = p && e.touches.length === 1 ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null; }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (!swipe0 || view !== 'today') return; const t0 = swipe0; swipe0 = null;
+    const c = e.changedTouches[0], dx = c.clientX - t0.x, dy = c.clientY - t0.y;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) setTodayPage(dx < 0 ? 'special' : 'routine');
+  }, { passive: true });
   let collapsed = {}, lastDraw = null, ledgerKeys = null, lastCheckMin = -1, lastMin = -1;
   const logCache = {}; let logChain = Promise.resolve();
 
@@ -273,7 +289,7 @@
 
   /* ---------- 提示 ---------- */
   function toast(html, ms, live) {
-    const el = document.createElement('div'); el.className = 'toast'; el.innerHTML = html;
+    const el = document.createElement('div'); el.className = 'toast'; el.innerHTML = ttPlural(html);
     if (live) el.style.pointerEvents = 'auto';
     toasts.appendChild(el); setTimeout(() => el.remove(), ms || 4200);
   }
@@ -503,7 +519,15 @@
     h += pageHead(tt('任务日志')) + buddyHtml();
     h += tt('<section class="dayline"><div class="row spread small"><span>今日经验 · 已学 <strong>') + Math.floor(live / 60) + tt('</strong> 分钟 · ') + head + '</span><span class="muted">' + nextTip + '</span></div><div class="segs">' + segs + '</div></section>';
 
-    L.GROUPS.forEach(g => {
+    // 学习页分两页：日常任务（每日、每周、非必要）和特别任务。点上方切换，或在任务区左右滑动
+    const spLeft = (S.specials || []).filter(g => L.specialVisible(g, now) && L.specialStarted(g, now)).reduce((a, g) => a + g.items.filter(x => !L.specialDone(g, x, now)).length, 0);
+    h += '<div class="segctl pagetabs" role="tablist">' +
+      '<button role="tab" data-act="tpage" data-p="routine" aria-pressed="' + (todayPage !== 'special') + '">' + tt('日常任务') + '</button>' +
+      '<button role="tab" data-act="tpage" data-p="special" aria-pressed="' + (todayPage === 'special') + '">' + tt('特别任务') + (spLeft ? ' <span class="badge num">' + spLeft + '</span>' : '') + '</button></div>';
+    h += '<div class="pager' + (pageAnim ? ' ' + pageAnim : '') + '" id="pager">';
+    pageAnim = '';
+    if (todayPage === 'special') h += specialsHtml(now);
+    else L.GROUPS.forEach(g => {
       const list = S.tasks.filter(x => x.group === g.id), open = !collapsed[g.id];
       let meta = '';
       if (g.id === 'daily' || g.id === 'weekly') {
@@ -515,8 +539,8 @@
         '<button class="icon" data-act="add" data-g="' + g.id + tt('" aria-label="在') + tt(g.name) + tt('里添加任务">+</button></div>');
       if (open) h += list.length ? list.map(x => card(x, g, now)).join('') : tt('<p class="muted small" style="margin:0 0 0 16px">这里还没有任务。</p>');
       h += '</section>';
-      if (g.id === 'daily') h += specialsHtml(now);
     });
+    h += '</div>';
     h += '<button class="btn" data-act="free"' + (t ? ' disabled' : '') + tt('>自由学习（不选任务，直接计时）</button>');
     return h;
   }
@@ -1081,7 +1105,7 @@
     if (phase === 'loading') return;
     if (phase === 'error') { main.innerHTML = tt('<div class="center"><h1>读取不到数据</h1><p class="muted">请检查网络并确认已经登录，然后重新打开这个页面。你的数据仍然保存在云端。</p></div>'); return; }
     if (phase === 'onboard') { main.innerHTML = viewOnboard(); return; }
-    main.innerHTML = view === 'draw' ? viewDraw() : view === 'stats' ? viewStats() : view === 'ledger' ? viewLedger() : view === 'settings' ? viewSettings() : viewToday();
+    main.innerHTML = ttPlural(view === 'draw' ? viewDraw() : view === 'stats' ? viewStats() : view === 'ledger' ? viewLedger() : view === 'settings' ? viewSettings() : viewToday());
     const cur = view === 'stats' || view === 'ledger' ? backTo : view;
     tabs.querySelectorAll('button').forEach(b => { if (b.dataset.tab === cur) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     main.scrollTop = top;
@@ -1097,7 +1121,7 @@
         '<div class="row" style="justify-content:center"><button class="btn" data-act="pause">' + (t.paused ? tt('继续') : tt('暂停')) + tt('</button><button class="btn primary" data-act="stop">结束</button></div><button class="btn ghost sm" data-act="abandon">放弃这次计时</button></div>');
     }
     if (modal) h += modalHtml();
-    layer.innerHTML = h;
+    layer.innerHTML = ttPlural(h);
     if (modal && modal.type === 'copy') { const ta = $('#copyta'); if (ta) ta.value = modal.data; }
     updateClock(Date.now());
   }
@@ -1132,6 +1156,7 @@
     'ov-open': () => { overlayOpen = true; renderLayer(); },
     'ov-close': () => { overlayOpen = false; renderLayer(); },
     pause: pauseTimer, stop: stopTimer,
+    tpage: el => setTodayPage(el.dataset.p),
     'sp-add': () => { modal = { type: 'sp-new', draft: { name: '', date: '', gap: false, gapDays: '3', gapAmt: '', gapType: 'min', bonus: '', bonusType: 'min', items: [{ name: '', amt: '', type: 'min', cond: '', showCond: false }] } }; renderLayer(); },
     'sp-more': () => { spDraftRead(); modal.draft.items.push({ name: '', amt: '', type: 'min', cond: '', showCond: false }); renderLayer(); const n = modal.draft.items.length - 1, el = $('#sp-n' + n); if (el) el.focus(); },
     'sp-rm': el => { spDraftRead(); modal.draft.items.splice(Number(el.dataset.i), 1); renderLayer(); },

@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.12.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.12.1', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -1006,13 +1006,22 @@
     ['weeklyAllMin', tt('每周全清奖励分钟')], ['weeklyAllTickets', tt('每周全清券数')],
     ['pityN', tt('保底抽数')], ['critPct', tt('暴击概率 %')], ['roundTo', tt('游戏扣时取整分钟')],
   ];
+  // 设置页按用途分组显示，每项一行：左边说明，右边输入框
+  const FIELD_GROUPS = [
+    [tt('学习时长'), ['segMin', 'segReward', 'segTickets', 'segCap']],
+    [tt('启动奖'), ['startMin', 'startTickets']],
+    [tt('任务完成'), ['dailyTaskTickets', 'dailyAllMin', 'dailyAllTickets', 'weeklyAllMin', 'weeklyAllTickets']],
+    [tt('余额与抽奖'), ['bankCapMin', 'pityN', 'critPct', 'roundTo']],
+  ];
+  const fieldsHtml = cur => FIELD_GROUPS.map(([title, keys]) => '<div class="setgroup"><h3>' + title + '</h3>' +
+    keys.map(k => { const f = FIELDS.find(x => x[0] === k); return '<label class="setrow"><span>' + f[1] + '</span><input type="number" inputmode="decimal" min="0" step="any" id="set-' + k + '" value="' + cur[k] + '"></label>'; }).join('') + '</div>').join('');
   function viewSettings() {
     const cur = S.settings, nq = (S.scheduled || []).filter(q => q.type === 'settings').length;
     let h = pageHead(tt('设置')) +
       tt('<section class="sec"><h2>记录</h2><div class="row"><button class="btn" data-act="tab" data-tab="stats" data-back="settings">冒险记录（统计）</button><button class="btn" data-act="tab" data-tab="ledger" data-back="settings">全部流水</button></div></section>');
     h += queueHtml();
-    h += tt('<section class="sec"><h2>奖励数值</h2><p class="small muted" style="margin:0">') + tt('下面是现在正在用的数值。保存时可以选择立即生效，或者排到以后的日子。') + (nq ? ' ' + tt('有 # 个数值修改在排队，见上面「准备生效的修改」。').replace('#', nq) : '') + '</p><div class="grid2">' +
-      FIELDS.map(f => '<label class="field">' + f[1] + '<input type="number" inputmode="decimal" min="0" step="any" id="set-' + f[0] + '" value="' + cur[f[0]] + '"></label>').join('') + '</div></section>';
+    h += tt('<section class="sec"><h2>奖励数值</h2><p class="small muted" style="margin:0">') + tt('下面是现在正在用的数值。保存时可以选择立即生效，或者排到以后的日子。') + (nq ? ' ' + tt('有 # 个数值修改在排队，见上面「准备生效的修改」。').replace('#', nq) : '') + '</p>' +
+      fieldsHtml(cur) + '</section>';
     h += tt('<section class="sec"><h2>奖池</h2><div class="inline small muted"><span>稀有度</span><span>概率 %</span><span>分钟</span></div>') +
       cur.pool.map((p, i) => '<div class="inline"><b class="t' + p.k + '" style="font-family:var(--display)">' + rName(p.k) + '</b><input type="number" inputmode="decimal" min="0" step="any" id="pool-p-' + i + '" value="' + p.p + '" aria-label="' + p.k + tt(' 赏概率"><input type="number" inputmode="decimal" min="0" step="any" id="pool-m-') + i + '" value="' + p.m + '" aria-label="' + p.k + tt(' 赏分钟"></div>')).join('') +
       whenHtml() + tt('<p class="small" id="seterr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="save-settings">保存设置</button><button class="btn ghost" data-act="reset-settings">填回默认值</button></div></section>');

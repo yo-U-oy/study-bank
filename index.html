@@ -324,6 +324,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @keyframes slideok{0%{box-shadow:0 0 0 rgba(240,211,142,0)}40%{box-shadow:0 0 40px rgba(240,211,142,.8)}100%{box-shadow:0 0 0 rgba(240,211,142,0)}}
 @keyframes shine{from{background-position:100% 0}to{background-position:0 0}}
 .cheer .ctier.tA{color:var(--brass-hi);text-shadow:0 0 18px rgba(240,211,142,.6)}
+/* 设置页奖励数值：分组，每项一行 */
+.setgroup{display:flex;flex-direction:column}
+.setgroup h3{font-size:14px;color:var(--brass);margin:6px 0 2px;letter-spacing:.08em}
+.setrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px dashed rgba(122,95,54,.35);font-size:14px;color:var(--muted)}
+.setgroup h3+.setrow{border-top:0}
+.setrow span{flex:1;min-width:0}
+.setrow input{width:5.5em;flex:none;text-align:right;background:#0f0c0a;border:1px solid var(--line);border-radius:4px;padding:8px 10px;color:var(--text);min-height:40px}
 /* 生效时间选择、排队列表 */
 .when{border:1px solid var(--line);border-radius:4px;padding:10px 12px;margin:0;display:flex;flex-direction:column;gap:8px}
 .when legend{padding:0 6px;font-size:13px;color:var(--brass);font-family:var(--display)}

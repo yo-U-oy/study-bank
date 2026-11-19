@@ -215,4 +215,5 @@ window.I18N_EN = {
   '填了日期，任务只在这段时间里显示和计算奖励；不填就一直有效。': 'With dates, the task only shows and earns rewards within that range. Without dates, it is always active.',
   '结束日期不能早于开始日期。': 'The end date cannot be before the start date.',
   '取消排队的修改': 'Cancel scheduled change', '已取消这条修改。': 'That change was cancelled.',
+  '学习时长': 'Study time', '启动奖': 'Starter bonus', '任务完成': 'Task completion', '余额与抽奖': 'Balance and draws',
 };

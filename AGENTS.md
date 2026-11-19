@@ -23,7 +23,7 @@
 | `index.html` | 页面骨架、全部 CSS（暗黑奇幻主题，颜色集中在开头的 CSS 变量里）、PWA 标签、Service Worker 注册与"新版本"提示 |
 | `logic.js` | 纯规则：结算奖励、抽奖、跨日跨周、旧数据升级（`migrate`）。**不碰界面、不碰存储**，可以在 Node 里直接测试 |
 | `app.js` | 界面渲染、按钮事件（`ACT` 对象）、计时器、撤销、统计、闹铃、存储读写、备份导入导出 |
-| `voices.js` | 11 位同伴的台词（`window.VOICES`） |
+| `voices.js` / `voices-en.js` | 11 位同伴的台词，中文 `window.VOICES`、英文 `window.VOICES_EN`，顺序一致，加台词时两边都要加 |
 | `i18n.js` | 界面语言：`tt('中文')` 在英文模式下把中文片段换成英文；`ttLabel()` 只在提示里翻译流水标签；语言存在 localStorage 的 `bank-lang` |
 | `i18n-en.js` | 英文词典 `window.I18N_EN`，键是中文片段（去掉首尾空格），值是英文 |
 | `sw.js` | Service Worker：离线缓存与更新 |

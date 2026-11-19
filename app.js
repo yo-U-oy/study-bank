@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.9.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.10.0', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -37,7 +37,7 @@
 
   // 同伴小人：共 11 位，按日期或计时轮换。台词是原创的，只模仿语气
   const SPRITES = 11, spr = n => 'sprites/c' + n + '.png';
-  const MATES = window.VOICES || [];
+  const MATES = (window.LANG === 'en' && window.VOICES_EN) || window.VOICES || [];
   // 系统自带的名字（游戏时间、自由学习、默认任务）按界面语言显示；用户自己起的名字不翻译
   const nm = n => (n === '游戏时间' || n === '自由学习') ? tt(n) : n;
   function localizeDefaults(st) { st.tasks.forEach(x => { x.name = tt(x.name); }); (st.specials || []).forEach(g => g.items.forEach(i => { i.name = tt(i.name); })); return st; }

@@ -236,4 +236,5 @@ window.I18N_EN = {
   '欠超过 3 小时：再 −2': 'Owing more than 3 hours: another −2', '把欠账全部还清的那天：再 +10': 'The day you clear your debt: another +10', '等级': 'Levels',
   '80–100 优秀：随时可以借': '80–100 Excellent: borrow any time', '50–79 良好：随时可以借': '50–79 Good: borrow any time',
   '30–49 注意：最多欠到 2 小时': '30–49 Watch: owe up to 2 hours', '0–29 暂停借款：欠着时不能开始游戏，有余额时照常玩': '0–29 Borrowing paused: cannot start playing while in debt; play as usual with a balance',
+  '借着玩与信用': 'Playing on credit', '现在：': 'Now: ',
 };

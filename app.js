@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.14.0', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.15.0', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -285,9 +285,7 @@
   }
   function checkRollover(now) {
     if (S.today.key !== L.dayKey(now) || S.week.key !== L.weekKey(now)) {
-      const rank = sc => ['paused', 'watch', 'good', 'great'].indexOf(L.creditTier(sc)), before = rank(L.ensureCredit(S).score);
       L.rollover(S, now); S.undo = null; S.timerBase = null; save();
-      if (rank(S.credit.score) > before) setTimeout(() => toast(tt('信用升到了「#」。').replace('#', creditName(S.credit.score)), 6000), 1200);
       return true;
     }
     return false;
@@ -496,7 +494,6 @@
       tt('<div class="row spread"><span class="label">剩余游戏时间') + (S.settings.bankCapMin > 0 ? tt('（最多存 ') + fmtMin(S.settings.bankCapMin) + tt('）') : '') + tt('</span><span class="small muted">抽奖券 <strong class="num" style="color:var(--brass-hi);font-size:18px">') + S.tickets + tt('</strong> 张</span></div>') +
       '<div class="amount">' + (S.bank < 0 ? tt('<small style="margin-left:0">欠</small>') : '') + Math.floor(Math.abs(S.bank) / 60) + tt('<small>小时</small>') + (Math.abs(S.bank) % 60) + tt('<small>分钟</small></div>') +
       (S.bank < 0 ? tt('<p class="small muted" style="margin:0">之后抽到的游戏时间会先用来还账。</p>') : '') +
-      '<button class="creditline tier-' + L.creditTier(L.ensureCredit(S).score) + '" data-act="credit">' + tt('信用') + ' <b class="num">' + S.credit.score + '</b> · ' + creditName(S.credit.score) + ' <span aria-hidden="true">&#8250;</span></button>' +
       '<div class="row">' +
       '<button class="btn primary" data-act="play"' + (t ? ' disabled' : '') + tt('>开始游戏计时</button>') +
       tt('<button class="btn ghost" data-act="deduct">手动扣除</button></div></section>');
@@ -1044,9 +1041,31 @@
       tt('<button class="btn" data-act="export">导出备份</button><label class="btn" for="importfile" tabindex="0">导入备份</label><input type="file" id="importfile" accept=".json,application/json" hidden></div></section>');
     h += langHtml();
     h += ghSettingsHtml();
+    h += creditSectionHtml();
     h += tt('<section class="sec"><h2>关于</h2><p style="margin:0"><b class="num" style="color:var(--brass-hi)">版本 ') + APP_VERSION + '</b> <span class="small muted">· ' + (cloud ? tt('Claude 版') : tt('独立版')) + ' · ' + APP_DATE + tt('</span></p><p class="small muted" style="margin:0">本页为免费的非官方同人作品，与 Larian Studios、Wizards of the Coast 无关，未经其批准或认可。同伴角色及其名称属于《博德之门 3》，版权归 Larian Studios 及 Wizards of the Coast 所有。</p>') +
       tt('<p class="small muted" style="margin:0" lang="en">学习抽卡银行 (Study Gacha Bank) is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. &copy;Wizards of the Coast LLC. Baldur&#39;s Gate 3 characters &copy; Larian Studios. This is free, non-commercial fan content and is not affiliated with Larian Studios.</p></section>');
+    // 比较大的板块做成可以折叠（默认收起，记住打开过的）
+    [['奖励数值', 'values'], ['奖池', 'pool'], ['备份', 'backup'], ['同步到 GitHub', 'gh'], ['借着玩与信用', 'credit'], ['关于', 'about']].forEach(([title, key]) => { h = foldSection(h, tt(title), key); });
     return h;
+  }
+  const foldOpen = {};
+  document.addEventListener('toggle', e => { const d = e.target; if (d && d.dataset && d.dataset.fold) foldOpen[d.dataset.fold] = d.open; }, true);
+  function foldSection(h, title, key) {
+    const head = '<section class="sec"><h2>' + title + '</h2>', i = h.indexOf(head); if (i < 0) return h;
+    const j = h.indexOf('</section>', i); if (j < 0) return h;
+    return h.slice(0, i) + '<details class="sec fold" data-fold="' + key + '"' + (foldOpen[key] ? ' open' : '') + '><summary><h2>' + title + '</h2></summary><div class="foldbody">' +
+      h.slice(i + head.length, j) + '</div></details>' + h.slice(j + '</section>'.length);
+  }
+  // 借着玩与信用：只写现在的等级和规则，不显示分数（看到分数会紧张）
+  function creditSectionHtml() {
+    const tier = L.creditTier(L.ensureCredit(S).score);
+    const desc = { great: tt('还款记录很好，可以随时借着玩。'), good: tt('可以随时借着玩。'), watch: tt('还能借，但最多欠到 2 小时。'), paused: tt('欠着的时候暂时不能借，先还一部分就好。') }[tier];
+    return '<section class="sec"><h2>' + tt('借着玩与信用') + '</h2><p style="margin:0">' + tt('现在：') + '<b>' + creditName(S.credit.score) + '</b>' + tt('。') + desc + '</p>' +
+      '<p class="small muted" style="margin:0">' + tt('信用只看最近的还款情况：偶尔玩多了没关系，一直欠着、越欠越多才会变低。它只影响能不能借，不会扣你已经拿到的东西。') + '</p>' +
+      '<h3 style="font-size:15px;margin:4px 0 0">' + tt('每天凌晨 4:00 按前一天结束时的余额计算') + '</h3><ul class="small credlist">' +
+      '<li>' + tt('没有欠账：+3') + '</li><li>' + tt('欠着，但比前一天少了：+1') + '</li><li>' + tt('欠着，而且没有变少：−2') + '</li><li>' + tt('欠超过 3 小时：再 −2') + '</li><li>' + tt('把欠账全部还清的那天：再 +10') + '</li></ul>' +
+      '<h3 style="font-size:15px;margin:4px 0 0">' + tt('等级') + '</h3><ul class="small credlist">' +
+      '<li>' + tt('80–100 优秀：随时可以借') + '</li><li>' + tt('50–79 良好：随时可以借') + '</li><li>' + tt('30–49 注意：最多欠到 2 小时') + '</li><li>' + tt('0–29 暂停借款：欠着时不能开始游戏，有余额时照常玩') + '</li></ul></section>';
   }
   function readSettings() {
     const s = clone(S.settings);
@@ -1108,18 +1127,6 @@
     if (m.type === 'sp-confirm') return spConfirmHtml(m);
     if (m.type === 'sp-new') b = spNewHtml(m);
     else if (m.type === 'info') b = '<h3>' + m.title + '</h3><p style="margin:0">' + m.html + '</p><div class="row"><button class="btn primary" data-act="m-close">' + tt('知道了') + '</button></div>';
-    else if (m.type === 'credit') {
-      const c = L.ensureCredit(S), tier = L.creditTier(c.score);
-      const desc = { great: tt('还款记录很好，可以随时借着玩。'), good: tt('可以随时借着玩。'), watch: tt('还能借，但最多欠到 2 小时。'), paused: tt('欠着的时候暂时不能借，先还一部分就好。') }[tier];
-      b = '<h3>' + tt('信用') + ' <span class="num">' + c.score + '</span> · ' + creditName(c.score) + '</h3><p style="margin:0">' + desc + '</p>' +
-        '<div class="credmeter"><span style="width:' + c.score + '%"></span></div>' +
-        '<p class="small muted" style="margin:0">' + tt('信用只看最近的还款情况：偶尔玩多了没关系，一直欠着、越欠越多才会变低。它只影响能不能借，不会扣你已经拿到的东西。') + '</p>' +
-        '<h3 style="font-size:15px;margin:4px 0 0">' + tt('每天凌晨 4:00 按前一天结束时的余额计算') + '</h3><ul class="small credlist">' +
-        '<li>' + tt('没有欠账：+3') + '</li><li>' + tt('欠着，但比前一天少了：+1') + '</li><li>' + tt('欠着，而且没有变少：−2') + '</li><li>' + tt('欠超过 3 小时：再 −2') + '</li><li>' + tt('把欠账全部还清的那天：再 +10') + '</li></ul>' +
-        '<h3 style="font-size:15px;margin:4px 0 0">' + tt('等级') + '</h3><ul class="small credlist">' +
-        '<li>' + tt('80–100 优秀：随时可以借') + '</li><li>' + tt('50–79 良好：随时可以借') + '</li><li>' + tt('30–49 注意：最多欠到 2 小时') + '</li><li>' + tt('0–29 暂停借款：欠着时不能开始游戏，有余额时照常玩') + '</li></ul>' +
-        '<div class="row"><button class="btn primary" data-act="m-close">' + tt('知道了') + '</button></div>';
-    }
     else if (m.type === 'confirm') b = '<h3>' + m.title + '</h3><p style="margin:0">' + m.html + '</p><div class="row"><button class="btn primary" data-act="m-ok">' + m.okLabel + tt('</button><button class="btn ghost" data-act="m-close">取消</button></div>');
     else if (m.type === 'adjust') b = tt('<h3>这次计时超过 3 小时</h3><p style="margin:0">计时器显示 ') + fmtMin(Math.floor(m.sec / 60)) + tt('。如果中途忘了停，可以改成实际的分钟数。</p><label class="field">实际分钟数<input type="number" inputmode="numeric" min="0" id="adj" value="') + Math.floor(m.sec / 60) + tt('"></label><div class="row"><button class="btn primary" data-act="m-adjust">确认并结束</button><button class="btn ghost" data-act="m-close">继续计时</button></div>');
     else if (m.type === 'deduct') b = tt('<h3>手动扣除游戏时间</h3><p class="muted small" style="margin:0">忘记开计时就玩了的时候用。现在余额 ') + fmtMin(S.bank) + tt('。</p><label class="field">扣除分钟数<input type="number" inputmode="numeric" min="1" id="ded"></label><p class="small" id="merr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="m-deduct">扣除</button><button class="btn ghost" data-act="m-close">取消</button></div>');
@@ -1241,7 +1248,6 @@
     collapse: el => { collapsed[el.dataset.g] = !collapsed[el.dataset.g]; renderMain(); },
     add: el => { modal = { type: 'task', id: null, task: L.newTask('', '', el.dataset.g) }; renderLayer(); const n = $('#t-name'); if (n) n.focus(); },
     edit: el => { const x = S.tasks.find(q => q.id === el.dataset.id); if (!x) return; const view = Object.assign({}, x); modal = { type: 'task', id: x.id, task: view }; renderLayer(); },
-    credit: () => { modal = { type: 'credit' }; renderLayer(); },
     deduct: () => { modal = { type: 'deduct' }; renderLayer(); const n = $('#ded'); if (n) n.focus(); },
     'ov-open': () => { overlayOpen = true; renderLayer(); },
     'ov-close': () => { overlayOpen = false; renderLayer(); },

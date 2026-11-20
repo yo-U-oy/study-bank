@@ -324,6 +324,14 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @keyframes slideok{0%{box-shadow:0 0 0 rgba(240,211,142,0)}40%{box-shadow:0 0 40px rgba(240,211,142,.8)}100%{box-shadow:0 0 0 rgba(240,211,142,0)}}
 @keyframes shine{from{background-position:100% 0}to{background-position:0 0}}
 .cheer .ctier.tA{color:var(--brass-hi);text-shadow:0 0 18px rgba(240,211,142,.6)}
+/* 设置页折叠板块 */
+details.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:32px}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary h2{margin:0}
+details.fold>summary::after{content:'';width:9px;height:9px;border-right:2px solid var(--brass);border-bottom:2px solid var(--brass);transform:rotate(45deg) translate(-2px,-2px);transition:transform .2s;flex:none}
+details.fold[open]>summary::after{transform:rotate(-135deg) translate(-2px,-2px)}
+details.fold{gap:0}
+details.fold>.foldbody{display:flex;flex-direction:column;gap:12px;margin-top:12px}
 /* 信用 */
 .creditline{align-self:flex-start;background:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px;color:var(--muted);font-size:13px;cursor:pointer;min-height:32px}
 .creditline b{color:var(--text)}

@@ -72,6 +72,7 @@ Claude 版的 `index.html` 没有 PWA 部分，其余与独立版相同。
 - **撤销**：每个操作前保存快照（`S.undo`），流水条目带操作编号 `a`。抽奖不能撤销。
 - **任务分组**：每日、每周、非必要三组在 `logic.js` 的 `GROUPS`；特别任务单独存放在 `state.specials`，在学习页显示在每日下面。
 - **特别任务**：规则在 `logic.js` 的 `newSpecial / specialVisible / completeSpecial`；每天重复的特别任务用 `repeat: 'daily'`，完成状态按天记在 `doneDay`，`date` 表示开始日期。完成必须经过两步确认（点完成 → 同伴询问 + 滑动到底），这是作者特意要求的，不要简化成一键完成。
+- **进度型特别任务（1.16.0 起）**：`kind: 'progress'`，`mode` 为 `count`（按数量：`total / step / stepMin / stepTix / cur / paid`，章节在 `marks`）或 `items`（按条目，每条在 `items`）。规则在 `logic.js` 的 `newProgress / updateProgress / progressAdvance / progressTick`；进度只能往前，改错用撤销。`date` 是开始日期，`due` 是截止日期，只用来显示，过了不扣东西、不收起。记进度也要走同伴询问 + 滑动确认（`sp-confirm` 弹窗带 `prog`）。处理特别任务的代码要先用 `L.isProgress(g)` 分开。
 - **同人声明**：设置页"关于"、`index.html` 开头注释、`README.md` 里的非官方同人声明不要删。同伴角色来自《博德之门 3》，只能免费、非商业使用。
 
 ## 6. 修改数据（不是功能）

@@ -286,7 +286,75 @@
 
   // ---------- 特别任务：自己设的一次性任务，手动确认完成后直接发奖励 ----------
   // 结构：{ id, name, date|null, bonusMin, bonusTix, bonusDone, created, items: [{ id, name, min, tix, cond, done, doneAt }] }
+  // ---------- 进度型特别任务（一本书、一门课）----------
+  // mode 'count'：按数量（页、题），每 step 个单位一格，每格奖励 stepMin / stepTix；marks 是章节，读到 at 时额外奖励
+  // mode 'items'：按条目（第几章、第几节课），每一条单独打勾领奖励
+  // date 是开始日期，due 是截止日期（只用来显示，过了不扣东西、不消失）；hist 记下每次进度和时间
+  function isProgress(g) { return !!g && g.kind === 'progress'; }
+  function progCells(g) { return g.mode === 'count' ? Math.ceil(g.total / Math.max(1, g.step)) : g.items.length; }
+  function progReached(g, cur) { return cur >= g.total ? progCells(g) : Math.floor(cur / Math.max(1, g.step)); }
+  function progDone(g) { return g.mode === 'count' ? g.cur >= g.total : g.items.length > 0 && g.items.every(x => x.done); }
+  function progFields(g, spec) {
+    g.name = spec.name || ''; g.unit = spec.unit || (g.mode === 'count' ? '页' : '');
+    g.total = Math.max(1, Math.round(spec.total || 1)); g.step = Math.max(1, Math.round(spec.step || 1));
+    g.stepMin = spec.stepMin || 0; g.stepTix = spec.stepTix || 0;
+    g.bonusMin = spec.bonusMin || 0; g.bonusTix = spec.bonusTix || 0;
+    g.date = spec.date || null; g.due = spec.due || null;
+  }
+  function newProgress(state, spec, now) {
+    if (!Array.isArray(state.specials)) state.specials = [];
+    state.seq = (state.seq || 0) + 1;
+    const g = { id: 's' + state.seq, kind: 'progress', mode: spec.mode === 'items' ? 'items' : 'count', cur: 0, paid: 0, marks: [], items: [], hist: [], bonusDone: false, created: dayKey(now), doneAt: null, repeat: null };
+    progFields(g, spec);
+    let n = 0;
+    (spec.marks || []).forEach(m => { n++; g.marks.push({ id: g.id + '-m' + n, name: m.name, at: Math.round(m.at), min: m.min || 0, tix: m.tix || 0, doneAt: null }); });
+    (spec.items || []).forEach(it => { n++; g.items.push({ id: g.id + '-' + n, name: it.name, min: it.min || 0, tix: it.tix || 0, done: false, doneAt: null }); });
+    g.marks.sort((a, b) => a.at - b.at);
+    state.specials.push(g); return g;
+  }
+  function updateProgress(g, spec) {
+    progFields(g, spec);
+    let n = [...g.marks, ...g.items].reduce((a, x) => Math.max(a, parseInt(String(x.id).split(/-m?/).pop(), 10) || 0), 0);
+    g.marks = (spec.marks || []).map(m => { const o = m.id && g.marks.find(x => x.id === m.id); if (o) { o.name = m.name; o.at = Math.round(m.at); o.min = m.min || 0; o.tix = m.tix || 0; return o; } n++; return { id: g.id + '-m' + n, name: m.name, at: Math.round(m.at), min: m.min || 0, tix: m.tix || 0, doneAt: null }; }).sort((a, b) => a.at - b.at);
+    if (g.mode === 'items') g.items = (spec.items || []).map(it => { const o = it.id && g.items.find(x => x.id === it.id); if (o) { o.name = it.name; o.min = it.min || 0; o.tix = it.tix || 0; return o; } n++; return { id: g.id + '-' + n, name: it.name, min: it.min || 0, tix: it.tix || 0, done: false, doneAt: null }; });
+    if (g.mode === 'count') { g.cur = Math.min(g.cur, g.total); g.paid = Math.min(g.paid, progReached(g, g.cur)); }
+    if (!progDone(g)) g.doneAt = null; else if (!g.doneAt) g.doneAt = Date.now();
+    return g;
+  }
+  // 按数量：进度推到 to（只能往前），把中间跨过的格子、章节奖励一起发
+  function progressAdvance(state, gid, to, now) {
+    const ev = [], g = (state.specials || []).find(x => x.id === gid);
+    if (!isProgress(g) || g.mode !== 'count') return ev;
+    to = Math.max(0, Math.min(g.total, Math.round(to)));
+    if (to <= g.cur) return ev;
+    const reached = progReached(g, to), k = reached - g.paid;
+    if (k > 0) give(state, ev, '特别任务：' + g.name + ' ' + to + '/' + g.total + g.unit, k * g.stepMin, k * g.stepTix);
+    g.paid = Math.max(g.paid, reached);
+    g.marks.forEach(m => { if (!m.doneAt && m.at <= to) { m.doneAt = now; give(state, ev, '特别任务：' + g.name + ' · ' + m.name, m.min, m.tix); } });
+    g.cur = to; (g.hist = g.hist || []).push({ t: now, to });
+    progFinish(state, g, ev, now);
+    return ev;
+  }
+  // 按条目：勾掉一条
+  function progressTick(state, gid, iid, now) {
+    const ev = [], g = (state.specials || []).find(x => x.id === gid);
+    if (!isProgress(g) || g.mode !== 'items') return ev;
+    const it = g.items.find(x => x.id === iid); if (!it || it.done) return ev;
+    it.done = true; it.doneAt = now;
+    give(state, ev, '特别任务：' + g.name + ' · ' + it.name, it.min, it.tix);
+    progFinish(state, g, ev, now);
+    return ev;
+  }
+  function progFinish(state, g, ev, now) {
+    if (!progDone(g) || g.doneAt) return;
+    g.doneAt = now;
+    if (!g.bonusDone && (g.bonusMin || g.bonusTix)) { g.bonusDone = true; give(state, ev, '特别任务全部完成：' + g.name, g.bonusMin, g.bonusTix); }
+  }
+  // 还剩几项（用来显示"还剩 N 项"）：进度任务没完成算 1 项
+  function specialLeft(g, now) { return isProgress(g) ? (progDone(g) || !specialStarted(g, now) ? 0 : 1) : (specialStarted(g, now) ? g.items.filter(x => !specialDone(g, x, now)).length : 0); }
+
   function newSpecial(state, spec, now) {
+    if (spec.kind === 'progress') return newProgress(state, spec, now);
     state.seq = (state.seq || 0) + 1;
     const g = { id: 's' + state.seq, name: spec.name || '', date: spec.date || null, repeat: spec.repeat || null, bonusMin: spec.bonusMin || 0, bonusTix: spec.bonusTix || 0, bonusDone: false, bonusDay: null, created: dayKey(now), items: [] };
     if (g.repeat === 'gap') { g.gapDays = spec.gapDays || 3; g.gapMin = spec.gapMin || 0; g.gapTix = spec.gapTix || 0; g.lastDay = null; }
@@ -303,8 +371,9 @@
   // 重复类特别任务有两种：'daily' 每天一次；'gap' 也是每天最多一次，但奖励按"距上次完成隔了几天"分档：在 gapDays 天之内再次完成拿高档，超过了拿基本档
   function perDay(g) { return g.repeat === 'daily' || g.repeat === 'gap'; }
   function specialDone(g, it, now) { return perDay(g) ? it.doneDay === dayKey(now) : !!it.done; }
-  function specialStarted(g, now) { return !perDay(g) || !g.date || g.date <= dayKey(now); }
+  function specialStarted(g, now) { return (!perDay(g) && !isProgress(g)) || !g.date || g.date <= dayKey(now); }
   function specialVisible(g, now) {
+    if (isProgress(g)) return !g.doneAt || dayKey(g.doneAt) >= dayKey(now);
     const today = dayKey(now);
     if (perDay(g)) return true;
     if (g.date) return g.date >= today;
@@ -344,6 +413,7 @@
   // 修改已建好的特别任务：保留每一项的编号、完成状态、已学时间；新增的项给新编号
   function updateSpecial(state, gid, spec, now) {
     const g = (state.specials || []).find(x => x.id === gid); if (!g) return null;
+    if (isProgress(g)) return updateProgress(g, spec);
     const wasPer = perDay(g), today = dayKey(now), old = g.items;
     g.name = spec.name || ''; g.date = spec.date || null; g.repeat = spec.repeat || null;
     g.bonusMin = spec.bonusMin || 0; g.bonusTix = spec.bonusTix || 0;
@@ -362,6 +432,6 @@
     return g;
   }
 
-  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward, updateSpecial, isEnded, schedule, cancelScheduled, applyScheduled, ensureCredit, creditTier, updateCredit, canBorrow };
+  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward, updateSpecial, isEnded, schedule, cancelScheduled, applyScheduled, ensureCredit, creditTier, updateCredit, canBorrow, isProgress, progCells, progReached, progDone, progressAdvance, progressTick, specialLeft };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Logic = api;
 })(typeof window !== 'undefined' ? window : globalThis);

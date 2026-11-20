@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.15.0', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.16.0', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -532,7 +532,7 @@
     h += tt('<section class="dayline"><div class="row spread small"><span>今日经验 · 已学 <strong>') + Math.floor(live / 60) + tt('</strong> 分钟 · ') + head + '</span><span class="muted">' + nextTip + '</span></div><div class="segs">' + segs + '</div></section>';
 
     // 学习页分两页：日常任务（每日、每周、非必要）和特别任务。点上方切换，或在任务区左右滑动
-    const spLeft = (S.specials || []).filter(g => L.specialVisible(g, now) && L.specialStarted(g, now)).reduce((a, g) => a + g.items.filter(x => !L.specialDone(g, x, now)).length, 0);
+    const spLeft = (S.specials || []).filter(g => L.specialVisible(g, now)).reduce((a, g) => a + L.specialLeft(g, now), 0);
     h += '<div class="segctl pagetabs" role="tablist">' +
       '<button role="tab" data-act="tpage" data-p="routine" aria-pressed="' + (todayPage !== 'special') + '">' + tt('日常任务') + '</button>' +
       '<button role="tab" data-act="tpage" data-p="special" aria-pressed="' + (todayPage === 'special') + '">' + tt('特别任务') + (spLeft ? ' <span class="badge num">' + spLeft + '</span>' : '') + '</button></div>';
@@ -605,7 +605,7 @@
   const rewardText = (min, tix) => [min ? '+' + min + tt(' 分钟') : '', tix ? '+' + tix + tt(' 张券') : ''].filter(Boolean).join(' ');
   function specialsHtml(now) {
     const list = (S.specials || []).filter(g => L.specialVisible(g, now)), open = !collapsed.special;
-    const left = list.reduce((a, g) => a + (L.specialStarted(g, now) ? g.items.filter(x => !L.specialDone(g, x, now)).length : 0), 0);
+    const left = list.reduce((a, g) => a + L.specialLeft(g, now), 0);
     let h = tt('<section class="group" data-g="special"><div class="ghead"><h2>特别任务</h2><span class="meta">') + (list.length ? tt('还剩 ') + left + tt(' 项') : '') + '</span>' +
       '<button class="icon" data-act="collapse" data-g="special" aria-label="' + (open ? tt('收起') : tt('展开')) + tt('特别任务">') + (open ? '&#8964;' : '&#8250;') + '</button>' +
       tt('<button class="icon" data-act="sp-add" aria-label="新建特别任务">+</button></div>');
@@ -614,6 +614,7 @@
       if (!list.length && !spAdds.length) h += tt('<p class="muted small" style="margin:0 0 0 16px">想给自己定一件额外的事？点右边的 + 新建，完成后直接拿奖励。</p>');
       h += spAdds.map(q => '<p class="small muted qadd">' + tt('# 加入：').replace('#', mdLabel(q.at)) + esc(q.data.spec.name || q.data.spec.items.map(i => i.name).join(tt('、'))) + '</p>').join('');
       list.forEach(g => {
+        if (L.isProgress(g)) { h += progCardHtml(g, now); return; }
         const today = L.dayKey(now), multi = g.items.length > 1, started = L.specialStarted(g, now), allDone = started && g.items.every(x => L.specialDone(g, x, now));
         const title = g.name || (multi ? tt('特别任务') : '');
         let tags = '';
@@ -642,8 +643,201 @@
     }
     return h + '</section>';
   }
+  /* ---------- 进度型特别任务：列表卡片、详细页 ---------- */
+  const daysTo = (k, now) => Math.round((Date.parse(k) - Date.parse(L.dayKey(now))) / 86400000);
+  function progLeftText(g) { return g.mode === 'count' ? (g.total - g.cur) : g.items.filter(x => !x.done).length; }
+  // 截止日期一行：还剩几天、每天大概多少；过了只写"慢慢来"
+  function dueLine(g, now) {
+    if (!g.due || L.progDone(g)) return '';
+    const d = daysTo(g.due, now);
+    if (d < 0) return tt('截止日期 # 已过，慢慢来就好。').replace('#', mdLabel(g.due));
+    const left = progLeftText(g), per = Math.ceil(left / (d + 1)), unit = g.mode === 'count' ? g.unit : (g.unit || tt('条'));
+    return tt('截止 #').replace('#', mdLabel(g.due)) + ' · ' + (d === 0 ? tt('今天截止') : tt('还剩 # 天').replace('#', d)) + (left > 0 ? ' · ' + tt('每天约 # 就能完成').replace('#', per + ' ' + unit) : '');
+  }
+  function progSummary(g) {
+    if (g.mode === 'count') { const cm = g.marks.find(m => !m.doneAt); return g.cur + ' / ' + g.total + ' ' + esc(g.unit) + (cm && g.cur > 0 ? ' · ' + tt('正在读 #').replace('#', esc(cm.name)) : ''); }
+    const n = g.items.filter(x => x.done).length, nx = g.items.find(x => !x.done);
+    return n + ' / ' + g.items.length + (nx ? ' · ' + tt('下一个：') + esc(nx.name) : '');
+  }
+  function progNext(g) {
+    if (L.progDone(g)) return '';
+    if (g.mode === 'count') {
+      const nextAt = Math.min((g.paid + 1) * g.step, g.total), k = nextAt - g.cur, r = rewardText(g.stepMin, g.stepTix);
+      const cm = g.marks.find(m => !m.doneAt);
+      let t = r ? tt('再 # 拿 ').replace('#', k + ' ' + esc(g.unit)) + r : '';
+      if (cm && (!r || cm.at - g.cur <= k * 3)) t += (t ? tt('；') : '') + tt('读完 # 再拿 ').replace('#', esc(cm.name)) + rewardText(cm.min, cm.tix);
+      return t;
+    }
+    const nx = g.items.find(x => !x.done); return nx ? tt('完成「#」拿 ').replace('#', esc(nx.name)) + rewardText(nx.min, nx.tix) : '';
+  }
+  const progPct = g => Math.round(100 * (g.mode === 'count' ? g.cur / g.total : g.items.filter(x => x.done).length / Math.max(1, g.items.length)));
+  function progCardHtml(g, now) {
+    const started = L.specialStarted(g, now), done = L.progDone(g);
+    let tags = ' <span class="tag">' + tt('进度') + '</span>';
+    if (!started) tags += ' <span class="tag">' + tt('从#开始').replace('#', mdLabel(g.date)) + '</span>';
+    if (done) tags += tt(' <span class="tag ok">已完成</span>');
+    queued('sp-edit', 'gid', g.id).forEach(q => { tags += ' <span class="tag">' + tt('# 修改').replace('#', mdLabel(q.at)) + '</span>'; });
+    queued('sp-del', 'gid', g.id).forEach(q => { tags += ' <span class="tag">' + tt('# 删除').replace('#', mdLabel(q.at)) + '</span>'; });
+    const due = dueLine(g, now), nx = progNext(g);
+    return '<article class="spcard prog' + (done ? ' done' : '') + '"><div class="sphead"><b>' + esc(g.name) + '</b>' + tags + '<span class="grow"></span>' +
+      '<button class="btn sm ghost" data-act="sp-edit" data-id="' + g.id + '" aria-label="' + tt('修改这个特别任务') + '">' + tt('修改') + '</button><button class="icon sm" data-act="sp-del" data-id="' + g.id + '" aria-label="' + tt('删除这个特别任务') + '">&times;</button></div>' +
+      '<button class="progopen" data-act="pg-open" data-id="' + g.id + '"><div class="progbar"><span style="width:' + progPct(g) + '%"></span></div>' +
+      '<div class="row spread small"><span class="num">' + progSummary(g) + '</span><span class="muted">' + tt('打开') + ' &#8250;</span></div>' +
+      (nx ? '<div class="small muted">' + nx + '</div>' : '') + (due ? '<div class="small muted">' + due + '</div>' : '') +
+      (done && g.doneAt ? '<div class="small" style="color:var(--ok)">' + tt('# 全部完成').replace('#', mdLabel(L.dayKey(g.doneAt))) + '</div>' : '') + '</button></article>';
+  }
+  function progDetailHtml(m) {
+    const g = (S.specials || []).find(x => x.id === m.gid); if (!g) return '';
+    const now = Date.now(), started = L.specialStarted(g, now), done = L.progDone(g), due = dueLine(g, now), off = !started || done;
+    let b = '<h3>' + esc(g.name) + '</h3><div class="progbar"><span style="width:' + progPct(g) + '%"></span></div>' +
+      '<div class="row spread small"><span class="num">' + progSummary(g) + '</span><span class="num muted">' + progPct(g) + '%</span></div>' +
+      (due ? '<p class="small muted" style="margin:0">' + due + '</p>' : '') +
+      (!started ? '<p class="small" style="margin:0;color:var(--brass-hi)">' + tt('从 # 开始，到时候才能记进度。').replace('#', mdLabel(g.date)) + '</p>' : '') +
+      (done && g.doneAt ? '<p class="small" style="margin:0;color:var(--ok)">' + tt('# 全部完成').replace('#', mdLabel(L.dayKey(g.doneAt))) + '</p>' : '');
+    if (g.mode === 'count') {
+      const cells = L.progCells(g);
+      b += '<p class="small muted" style="margin:0">' + (g.stepMin || g.stepTix ? tt('每 # 一格，每格 ').replace('#', g.step + ' ' + esc(g.unit)) + rewardText(g.stepMin, g.stepTix) + tt('。') : '') + tt('点一格表示读到这里，前面的格子会一起算。') + '</p><div class="cells">';
+      for (let k = 1; k <= cells; k++) {
+        const end = Math.min(k * g.step, g.total), ok = end <= g.cur, nextCell = !ok && k === g.paid + 1;
+        b += '<button class="cell' + (ok ? ' done' : '') + (nextCell ? ' next' : '') + '" data-act="pg-cell" data-id="' + g.id + '" data-to="' + end + '"' + (ok || off ? ' disabled' : '') + ' aria-label="' + tt('读到 #').replace('#', end + ' ' + esc(g.unit)) + '">' + (ok ? '&#10003;' : end) + '</button>';
+      }
+      b += '</div>';
+      if (!off) b += '<div class="row"><label class="field grow" style="margin:0">' + tt('或者直接填：读到第几') + esc(g.unit) + '<input type="number" inputmode="numeric" id="pg-to" min="' + (g.cur + 1) + '" max="' + g.total + '" placeholder="' + Math.min(g.total, g.cur + g.step) + '"></label><button class="btn" data-act="pg-jump" data-id="' + g.id + '" style="align-self:flex-end">' + tt('记下') + '</button></div><p class="small" id="merr" style="margin:0;color:var(--warn)"></p>';
+      if (g.marks.length) {
+        const cur = g.marks.find(x => !x.doneAt);
+        b += '<h3 style="font-size:15px;margin:4px 0 0">' + tt('章节') + '</h3>' + g.marks.map(x => '<div class="progrow' + (x.doneAt ? ' done' : '') + (x === cur ? ' now' : '') + '"><span class="pmark">' + (x.doneAt ? '&#10003;' : x === cur ? '&#9656;' : '') + '</span><span class="grow">' + esc(x.name) + ' <span class="small muted">' + tt('到 #').replace('#', x.at + ' ' + esc(g.unit)) + '</span></span>' +
+          '<span class="small num">' + (x.doneAt ? mdLabel(L.dayKey(x.doneAt)) + tt(' 完成') : x === cur && g.cur > 0 ? tt('正在读') : rewardText(x.min, x.tix)) + '</span></div>').join('');
+      }
+    } else {
+      const nx = g.items.find(x => !x.done);
+      b += g.items.map(x => '<div class="progrow' + (x.done ? ' done' : '') + (x === nx ? ' now' : '') + '"><span class="pmark">' + (x.done ? '&#10003;' : x === nx ? '&#9656;' : '') + '</span><span class="grow">' + esc(x.name) + '</span>' +
+        (x.done ? '<span class="small num">' + mdLabel(L.dayKey(x.doneAt)) + tt(' 完成') + '</span>' : '<span class="small num spreward">' + rewardText(x.min, x.tix) + '</span><button class="btn sm" data-act="pg-tick" data-id="' + g.id + '" data-i="' + x.id + '"' + (off ? ' disabled' : '') + '>' + tt('完成') + '</button>') + '</div>').join('');
+    }
+    if (g.bonusMin || g.bonusTix) b += '<div class="spbonus small' + (g.bonusDone ? ' got' : '') + '">' + tt('全部完成再 <b class="num">') + rewardText(g.bonusMin, g.bonusTix) + '</b>' + (g.bonusDone ? tt('　已领取') : '') + '</div>';
+    return b + '<div class="row"><button class="btn ghost" data-act="m-close">' + tt('关闭') + '</button></div>';
+  }
+  // 进度更新前的预览：在一份拷贝上算一遍，看会拿到多少
+  function progPreview(prog) {
+    const c = JSON.parse(JSON.stringify(S)), now = Date.now();
+    const ev = prog.to != null ? L.progressAdvance(c, prog.gid, prog.to, now) : L.progressTick(c, prog.gid, prog.iid, now);
+    return ev.reduce((a, e) => ({ min: a.min + e.min, tix: a.tix + e.tix }), { min: 0, tix: 0 });
+  }
+  function progAskText(prog) {
+    const g = (S.specials || []).find(x => x.id === prog.gid); if (!g) return '';
+    if (prog.to != null) return tt('「#」').replace('#', esc(g.name)) + tt('真的读到 # 了吗？').replace('#', prog.to + ' ' + esc(g.unit));
+    const it = g.items.find(x => x.id === prog.iid); return tt('「#」').replace('#', esc(g.name + ' · ' + (it ? it.name : ''))) + tt('真的完成了吗？');
+  }
+
+  /* ---------- 进度型特别任务：新建 / 修改表单 ---------- */
+  const PG_FORMATS = ['第 # 章', '第 # 节课', '第 # 课', '第 # 单元'];
+  function progFormHtml(d, typeSel) {
+    const p = d.p, cnt = p.mode !== 'items';
+    let b = '<label class="field">' + tt('名称') + '<input type="text" id="pg-name" maxlength="40" placeholder="' + tt('比如：基本情报教材') + '" value="' + esc(p.name) + '"></label>' +
+      '<div class="segctl"' + (d.lockMode ? ' style="display:none"' : '') + '><button data-act="sp-pmode" data-m="count" aria-pressed="' + cnt + '">' + tt('按数量（页、题）') + '</button><button data-act="sp-pmode" data-m="items" aria-pressed="' + !cnt + '">' + tt('按条目（章、课）') + '</button></div>';
+    if (cnt) {
+      b += '<div class="grid2"><label class="field">' + tt('单位') + '<input type="text" id="pg-unit" maxlength="6" value="' + esc(p.unit) + '"></label><label class="field">' + tt('一共多少') + '<input type="number" inputmode="numeric" min="1" id="pg-total" placeholder="300" value="' + esc(p.total) + '"></label></div>' +
+        '<div class="grid2"><label class="field">' + tt('每多少算一格') + '<input type="number" inputmode="numeric" min="1" id="pg-step" placeholder="10" value="' + esc(p.step) + '"></label><label class="field">' + tt('每格奖励（可不填）') + '<input type="number" inputmode="numeric" min="0" id="pg-sa" placeholder="1" value="' + esc(p.sa) + '"></label></div>' +
+        '<div class="inline2"><label class="field">' + tt('每格奖励单位') + typeSel('pg-st', p.st) + '</label></div>' +
+        '<h3 style="font-size:15px;margin:4px 0 0">' + tt('章节奖励（可不填）') + '</h3><p class="small muted" style="margin:-6px 0 0">' + tt('读到这一章的最后一页时，额外给奖励。') + '</p>';
+      p.marks.forEach((x, i) => {
+        b += '<div class="spedit"><div class="row spread"><b class="small">' + tt('第 # 项').replace('#', i + 1) + '</b><button class="btn ghost sm" data-act="pg-mrm" data-i="' + i + '">' + tt('删掉这一项') + '</button></div>' +
+          '<div class="grid2"><label class="field">' + tt('章节名') + '<input type="text" id="pg-mn' + i + '" maxlength="30" placeholder="' + tt('第 1 章') + '" value="' + esc(x.name) + '"></label><label class="field">' + tt('到第几结束') + '<input type="number" inputmode="numeric" min="1" id="pg-ma' + i + '" placeholder="30" value="' + esc(x.at) + '"></label></div>' +
+          '<div class="inline2"><label class="field">' + tt('奖励') + '<input type="number" inputmode="numeric" min="1" id="pg-mr' + i + '" placeholder="20" value="' + esc(x.amt) + '"></label><label class="field">' + tt('单位') + typeSel('pg-mt' + i, x.type) + '</label></div></div>';
+      });
+      b += '<button class="btn" data-act="pg-madd">' + tt('+ 加一个章节') + '</button>';
+    } else {
+      b += '<div class="spedit"><b class="small">' + tt('快速生成') + '</b><div class="grid2"><label class="field">' + tt('一共几条') + '<input type="number" inputmode="numeric" min="1" max="200" id="pg-gn" placeholder="10" value="' + esc(p.gn) + '"></label><label class="field">' + tt('名称格式') +
+        '<select id="pg-gf">' + PG_FORMATS.map(f => '<option value="' + f + '"' + (p.gf === f ? ' selected' : '') + '>' + tt(f).replace('#', 'N') + '</option>').join('') + '</select></label></div>' +
+        '<div class="inline2"><label class="field">' + tt('每条奖励') + '<input type="number" inputmode="numeric" min="1" id="pg-ga" placeholder="20" value="' + esc(p.ga) + '"></label><label class="field">' + tt('单位') + typeSel('pg-gt', p.gt) + '</label></div>' +
+        '<button class="btn sm" data-act="pg-gen">' + tt('生成') + '</button></div>';
+      p.items.forEach((x, i) => {
+        b += '<div class="spedit"><div class="row spread"><b class="small">' + tt('第 # 项').replace('#', i + 1) + '</b>' + (x.done ? '<span class="tag ok">' + tt('已完成') + '</span>' : '<button class="btn ghost sm" data-act="pg-irm" data-i="' + i + '">' + tt('删掉这一项') + '</button>') + '</div>' +
+          '<label class="field">' + tt('名称') + '<input type="text" id="pg-in' + i + '" maxlength="30" value="' + esc(x.name) + '"></label>' +
+          '<div class="inline2"><label class="field">' + tt('奖励') + '<input type="number" inputmode="numeric" min="1" id="pg-ir' + i + '" value="' + esc(x.amt) + '"></label><label class="field">' + tt('单位') + typeSel('pg-it' + i, x.type) + '</label></div></div>';
+      });
+      b += '<button class="btn" data-act="pg-iadd">' + tt('+ 再加一项') + '</button>';
+    }
+    b += '<div class="inline2"><label class="field">' + tt('全部完成的额外奖励（可不填）') + '<input type="number" inputmode="numeric" min="0" id="pg-bonus" placeholder="60" value="' + esc(p.bonus) + '"></label><label class="field">' + tt('单位') + typeSel('pg-btype', p.btype) + '</label></div>' +
+      '<div class="grid2"><label class="field">' + tt('开始日期（可不填）') + '<input type="date" id="pg-start" value="' + esc(p.start) + '"></label><label class="field">' + tt('截止日期（可不填）') + '<input type="date" id="pg-due" value="' + esc(p.due) + '"></label></div>' +
+      '<p class="small muted" style="margin:-4px 0 0">' + tt('截止日期只用来提醒进度：会显示还剩几天、每天大概要做多少。过了也不扣东西，任务也不会消失。') + '</p>';
+    return b;
+  }
+  function progDraftRead(d) {
+    const p = d.p, v = id => { const e = $('#' + id); return e ? e.value : ''; };
+    p.name = v('pg-name'); p.bonus = v('pg-bonus'); p.btype = v('pg-btype') || 'min'; p.start = v('pg-start'); p.due = v('pg-due');
+    if (p.mode !== 'items') {
+      p.unit = v('pg-unit'); p.total = v('pg-total'); p.step = v('pg-step'); p.sa = v('pg-sa'); p.st = v('pg-st') || 'tix';
+      p.marks = p.marks.map((x, i) => ({ id: x.id, name: v('pg-mn' + i), at: v('pg-ma' + i), amt: v('pg-mr' + i), type: v('pg-mt' + i) || 'min' }));
+    } else {
+      p.gn = v('pg-gn'); p.gf = v('pg-gf') || PG_FORMATS[0]; p.ga = v('pg-ga'); p.gt = v('pg-gt') || 'min';
+      p.items = p.items.map((x, i) => ({ id: x.id, done: x.done, name: v('pg-in' + i), amt: v('pg-ir' + i), type: v('pg-it' + i) || 'min' }));
+    }
+  }
+  // 检查并整理成规则用的格式；有问题返回 null 并在 err 里提示
+  function progSpec(d, err) {
+    const p = d.p, num = x => Math.round(Number(x)), rw = (amt, type) => ({ min: type === 'tix' ? 0 : amt, tix: type === 'tix' ? amt : 0 });
+    const name = p.name.trim(); if (!name) { err.textContent = tt('请给这个任务起个名字。'); return null; }
+    if (p.start && p.due && p.due < p.start) { err.textContent = tt('截止日期不能早于开始日期。'); return null; }
+    const bonus = Math.max(0, num(p.bonus) || 0);
+    const spec = { kind: 'progress', mode: p.mode === 'items' ? 'items' : 'count', name, date: p.start || null, due: p.due || null, bonusMin: rw(bonus, p.btype).min, bonusTix: rw(bonus, p.btype).tix, marks: [], items: [] };
+    if (spec.mode === 'count') {
+      const total = num(p.total), step = num(p.step), sa = Math.max(0, num(p.sa) || 0);
+      if (!(total > 0)) { err.textContent = tt('"一共多少"要填大于 0 的数字。'); return null; }
+      if (!(step > 0)) { err.textContent = tt('"每多少算一格"要填大于 0 的数字。'); return null; }
+      if (Math.ceil(total / step) > 300) { err.textContent = tt('格子太多了（超过 300 格），把"每多少算一格"填大一点。'); return null; }
+      Object.assign(spec, { unit: p.unit.trim() || tt('页'), total, step, stepMin: rw(sa, p.st).min, stepTix: rw(sa, p.st).tix });
+      for (let i = 0; i < p.marks.length; i++) {
+        const x = p.marks[i], at = num(x.at), amt = num(x.amt);
+        if (!x.name.trim()) { err.textContent = tt('第 # 个章节还没写名字。').replace('#', i + 1); return null; }
+        if (!(at > 0 && at <= total)) { err.textContent = tt('第 # 个章节的结束位置要在 1 到总数之间。').replace('#', i + 1); return null; }
+        if (!(amt > 0)) { err.textContent = tt('第 # 个章节的奖励要填大于 0 的数字。').replace('#', i + 1); return null; }
+        spec.marks.push(Object.assign({ id: x.id, name: x.name.trim(), at }, rw(amt, x.type)));
+      }
+      if (!sa && !spec.marks.length && !bonus) { err.textContent = tt('至少填一种奖励：每格奖励、章节奖励或全部完成的奖励。'); return null; }
+    } else {
+      if (!p.items.length) { err.textContent = tt('至少要有一条。可以用上面的"快速生成"。'); return null; }
+      for (let i = 0; i < p.items.length; i++) {
+        const x = p.items[i], amt = num(x.amt);
+        if (!x.name.trim()) { err.textContent = tt('第 ') + (i + 1) + tt(' 项还没写要做的事。'); return null; }
+        if (!(amt > 0)) { err.textContent = tt('第 ') + (i + 1) + tt(' 项的奖励要填大于 0 的数字。'); return null; }
+        spec.items.push(Object.assign({ id: x.id, name: x.name.trim() }, rw(amt, x.type)));
+      }
+      spec.unit = '';
+    }
+    return spec;
+  }
+  const newProgDraft = () => ({ name: '', mode: 'count', unit: tt('页'), total: '', step: '10', sa: '', st: 'tix', marks: [], items: [], gn: '', gf: PG_FORMATS[0], ga: '', gt: 'min', bonus: '', btype: 'min', start: '', due: '' });
+  function progDraftFrom(g) {
+    const amt = (min, tix) => String(tix || min || ''), typ = (min, tix) => (tix ? 'tix' : 'min');
+    return { name: g.name, mode: g.mode, unit: g.unit || tt('页'), total: String(g.total || ''), step: String(g.step || ''), sa: amt(g.stepMin, g.stepTix), st: g.stepMin ? 'min' : 'tix',
+      marks: g.marks.map(x => ({ id: x.id, name: x.name, at: String(x.at), amt: amt(x.min, x.tix), type: typ(x.min, x.tix) })),
+      items: g.items.map(x => ({ id: x.id, done: x.done, name: x.name, amt: amt(x.min, x.tix), type: typ(x.min, x.tix) })),
+      gn: '', gf: PG_FORMATS[0], ga: '', gt: 'min', bonus: amt(g.bonusMin, g.bonusTix), btype: typ(g.bonusMin, g.bonusTix), start: g.date || '', due: g.due || '' };
+  }
+
+  function progIt(g, prog) {
+    if (prog.to != null) return { name: g.name + ' · ' + tt('读到 #').replace('#', prog.to + ' ' + g.unit), cond: '' };
+    const it = g.items.find(x => x.id === prog.iid); return it ? { name: g.name + ' · ' + it.name, cond: '' } : null;
+  }
+  function progSave() {
+    const d = modal.draft, err = $('#merr'), spec = progSpec(d, err); if (!spec) return;
+    const eg = modal.editId ? (S.specials || []).find(x => x.id === modal.editId) : null;
+    if (modal.editId && !eg) { closeModal(); return; }
+    const w = readWhen(err); if (!w) return;
+    if (w.at) {
+      if (eg) act(tt('修改特别任务：') + spec.name, () => L.schedule(S, w.at, 'sp-edit', { gid: eg.id, spec }, Date.now()));
+      else act(tt('新建特别任务') + tt('：') + spec.name, () => L.schedule(S, w.at, 'sp-add', { spec }, Date.now()));
+      collapsed.special = false; save(); closeModal(); toastUndo(queuedNote(w.at)); return;
+    }
+    if (eg) { act(tt('修改特别任务：') + spec.name, () => L.updateSpecial(S, eg.id, spec, Date.now())); save(); closeModal(); toastUndo(tt('已保存修改。')); return; }
+    act(tt('新建特别任务') + tt('：') + spec.name, () => L.newSpecial(S, spec, Date.now()));
+    collapsed.special = false; save(); closeModal(); toastUndo(tt('特别任务建好了。'));
+  }
+  const kindSeg = m => m.editId ? '' : '<div class="segctl"><button data-act="sp-kind" data-k="normal" aria-pressed="' + (m.draft.kind !== 'progress') + '">' + tt('普通任务') + '</button><button data-act="sp-kind" data-k="progress" aria-pressed="' + (m.draft.kind === 'progress') + '">' + tt('进度（书、课程）') + '</button></div>';
+
   function spDraftRead() {
     const m = modal; if (!m || m.type !== 'sp-new') return;
+    if (m.draft.kind === 'progress') { progDraftRead(m.draft); const wr0 = whenRaw(); m.draft.when = wr0.sel; m.draft.whenDate = wr0.date; return; }
     m.draft.name = $('#sp-name').value; m.draft.date = $('#sp-date').value; m.draft.repeat = $('#sp-rep').checked; const wr = whenRaw(); m.draft.when = wr.sel; m.draft.whenDate = wr.date; m.draft.gap = $('#sp-gap').checked;
     m.draft.gapDays = $('#sp-gd').value; m.draft.gapAmt = $('#sp-ga').value; m.draft.gapType = $('#sp-gt').value;
     m.draft.bonus = $('#sp-bonus').value; m.draft.bonusType = $('#sp-btype').value;
@@ -651,7 +845,9 @@
   }
   function spNewHtml(m) {
     const d = m.draft, typeSel = (id, v) => '<select id="' + id + '"><option value="min"' + (v !== 'tix' ? ' selected' : '') + tt('>分钟</option><option value="tix"') + (v === 'tix' ? ' selected' : '') + tt('>抽奖券</option></select>');
-    let b = '<h3>' + (m.editId ? tt('修改特别任务') : tt('新建特别任务')) + '</h3><p class="small muted" style="margin:0">' + (m.editId ? tt('改完点"保存修改"。已经完成的状态和领到的奖励不会变。') : tt('自己定一件或几件想做的事，完成后直接拿奖励。奖励多少由你决定。')) + '</p>' +
+    if (d.kind === 'progress') return '<h3>' + (m.editId ? tt('修改特别任务') : tt('新建特别任务')) + '</h3>' + kindSeg(m) + progFormHtml(d, typeSel) + whenHtml(d.when, d.whenDate) +
+      '<p class="small" id="merr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="sp-save">' + (m.editId ? tt('保存修改') : tt('建好了')) + '</button><button class="btn ghost" data-act="m-close">' + tt('取消') + '</button></div>';
+    let b = '<h3>' + (m.editId ? tt('修改特别任务') : tt('新建特别任务')) + '</h3>' + kindSeg(m) + '<p class="small muted" style="margin:0">' + (m.editId ? tt('改完点"保存修改"。已经完成的状态和领到的奖励不会变。') : tt('自己定一件或几件想做的事，完成后直接拿奖励。奖励多少由你决定。')) + '</p>' +
       tt('<div class="grid2"><label class="field">组名（可不填）<input type="text" id="sp-name" maxlength="30" placeholder="比如：11/19 特别任务" value="') + esc(d.name) + '"></label>' +
       tt('<label class="field">日期（可不填）<input type="date" id="sp-date" value="') + esc(d.date) + '"></label></div>' +
       '<label class="check"><input type="checkbox" id="sp-rep"' + (d.repeat ? ' checked' : '') + tt('>每天重复（比如整理书桌，每天都能完成一次）</label>') +
@@ -675,7 +871,7 @@
     return b;
   }
   function spSave() {
-    spDraftRead(); const d = modal.draft, err = $('#merr'), items = [];
+    spDraftRead(); if (modal.draft.kind === 'progress') return progSave(); const d = modal.draft, err = $('#merr'), items = [];
     for (let i = 0; i < d.items.length; i++) {
       const it = d.items[i], name = it.name.trim(), amt = Math.round(Number(it.amt));
       if (!name) { err.textContent = tt('第 ') + (i + 1) + tt(' 项还没写要做的事。'); return; }
@@ -711,7 +907,7 @@
   }
   // 第二步确认：同伴来问一句，滑动到底才算完成
   function spConfirmHtml(m) {
-    const mt = MATES[m.n], g = S.specials.find(x => x.id === m.gid), it = g && g.items.find(x => x.id === m.iid);
+    const mt = MATES[m.n], g = S.specials.find(x => x.id === m.gid), it = g && (m.prog ? progIt(g, m.prog) : g.items.find(x => x.id === m.iid));
     if (!it) return '';
     if (m.step === 'done') {
       return tt('<div class="scrim legend" data-act="m-scrim"><div class="cheer spdone" role="dialog" aria-modal="true" aria-label="特别任务完成">') +
@@ -722,7 +918,7 @@
     return tt('<div class="scrim" data-act="m-scrim"><div class="sheet spask" role="dialog" aria-modal="true" aria-label="确认完成特别任务">') +
       '<div class="spwho"><img src="' + spr(m.n) + '" alt="' + mt.name + '"><p><span class="who">' + mt.name + tt('</span>「') + esc(it.name) + tt('」真的完成了吗？</p></div>') +
       (it.cond ? tt('<div class="spcond"><b>领取条件</b>') + esc(it.cond) + tt('<div class="small muted">滑到底表示这个条件也做到了。</div></div>') : '') +
-      '<div class="spreward big num">' + (r => rewardText(r.min, r.tix))(L.specialReward(g, it, Date.now())) + '</div>' +
+      '<div class="spreward big num">' + (r => rewardText(r.min, r.tix))(m.prog ? progPreview(m.prog) : L.specialReward(g, it, Date.now())) + '</div>' +
       tt('<div class="slide" id="spTrack"><div class="slide-fill" id="spFill"></div><span class="slide-text">向右滑动，确认完成</span><span class="slide-done" id="spDoneText"></span><button class="slide-knob" id="spKnob" aria-label="确认完成（也可以按回车）"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>') +
       '<div class="slide-burst" aria-hidden="true">' + '<i></i>'.repeat(12) + '</div></div>' +
       tt('<button class="btn ghost" data-act="m-close">还没完成</button></div></div>');
@@ -738,19 +934,21 @@
     const m = modal; if (!m || m.type !== 'sp-confirm' || m.step !== 'ask') return;
     m.step = 'busy'; const tr = $('#spTrack'); if (tr) tr.classList.add('ok');
     try { navigator.vibrate && navigator.vibrate([20, 40, 60]); } catch (e) {}
-    const g = S.specials.find(x => x.id === m.gid), it = g && g.items.find(x => x.id === m.iid);
-    const r0 = g && it ? L.specialReward(g, it, Date.now()) : { min: 0, tix: 0 };
-    const ev = act(tt('完成特别任务：') + (it ? it.name : ''), () => L.completeSpecial(S, m.gid, m.iid, Date.now()));
+    const g = S.specials.find(x => x.id === m.gid), it = g && (m.prog ? progIt(g, m.prog) : g.items.find(x => x.id === m.iid));
+    const r0 = m.prog ? progPreview(m.prog) : g && it ? L.specialReward(g, it, Date.now()) : { min: 0, tix: 0 };
+    const ev = act(tt('完成特别任务：') + (it ? it.name : ''), () => m.prog ? (m.prog.to != null ? L.progressAdvance(S, m.gid, m.prog.to, Date.now()) : L.progressTick(S, m.gid, m.prog.iid, Date.now())) : L.completeSpecial(S, m.gid, m.iid, Date.now()));
     if (ev.length) logAppend(ev);
     save(); renderMain();
     const total = ev.reduce((a, e) => ({ min: a.min + e.min, tix: a.tix + e.tix }), { min: 0, tix: 0 });
-    const capped = it && r0.min && total.min < r0.min + (ev.length > 1 ? g.bonusMin : 0);
-    const reward = (rewardText(total.min, total.tix) || '') + (ev.length > 1 ? tt('（含全部完成奖励）') : '') + (capped ? tt('　余额已到上限') : '');
+    const hasBonus = ev.some(e => e.label.indexOf('特别任务全部完成') === 0);
+    const capped = it && r0.min && total.min < r0.min + (!m.prog && ev.length > 1 ? g.bonusMin : 0);
+    const reward = (rewardText(total.min, total.tix) || '') + (hasBonus ? tt('（含全部完成奖励）') : '') + (capped ? tt('　余额已到上限') : '');
     const dt = $('#spDoneText'); if (dt) dt.textContent = tt('完成了') + (reward ? tt('　') + reward : '');
     const back = document.querySelector('.spask [data-act="m-close"]'); if (back) back.style.visibility = 'hidden';
     setTimeout(() => {
       if (!modal || modal.type !== 'sp-confirm') return;
       closeModal(); if (S.undo) toastUndo(tt('特别任务完成') + (reward ? tt('：') + reward : '') + tt('。'));
+      if (m.prog) { modal = { type: 'prog', gid: m.gid }; renderLayer(); }
     }, 1500);
   }
   document.addEventListener('pointerdown', e => {
@@ -1125,7 +1323,8 @@
         '<p><span class="who">' + mt.name + '</span>' + m.line + tt('</p><button class="btn primary" data-act="m-close">收下</button></div></div>');
     }
     if (m.type === 'sp-confirm') return spConfirmHtml(m);
-    if (m.type === 'sp-new') b = spNewHtml(m);
+    if (m.type === 'prog') b = progDetailHtml(m);
+    else if (m.type === 'sp-new') b = spNewHtml(m);
     else if (m.type === 'info') b = '<h3>' + m.title + '</h3><p style="margin:0">' + m.html + '</p><div class="row"><button class="btn primary" data-act="m-close">' + tt('知道了') + '</button></div>';
     else if (m.type === 'confirm') b = '<h3>' + m.title + '</h3><p style="margin:0">' + m.html + '</p><div class="row"><button class="btn primary" data-act="m-ok">' + m.okLabel + tt('</button><button class="btn ghost" data-act="m-close">取消</button></div>');
     else if (m.type === 'adjust') b = tt('<h3>这次计时超过 3 小时</h3><p style="margin:0">计时器显示 ') + fmtMin(Math.floor(m.sec / 60)) + tt('。如果中途忘了停，可以改成实际的分钟数。</p><label class="field">实际分钟数<input type="number" inputmode="numeric" min="0" id="adj" value="') + Math.floor(m.sec / 60) + tt('"></label><div class="row"><button class="btn primary" data-act="m-adjust">确认并结束</button><button class="btn ghost" data-act="m-close">继续计时</button></div>');
@@ -1253,7 +1452,28 @@
     'ov-close': () => { overlayOpen = false; renderLayer(); },
     pause: pauseTimer, stop: stopTimer,
     tpage: el => setTodayPage(el.dataset.p),
-    'sp-add': () => { modal = { type: 'sp-new', draft: { name: '', date: '', gap: false, gapDays: '3', gapAmt: '', gapType: 'min', bonus: '', bonusType: 'min', items: [{ name: '', amt: '', type: 'min', cond: '', showCond: false }] } }; renderLayer(); },
+    'sp-kind': el => { spDraftRead(); modal.draft.kind = el.dataset.k; if (!modal.draft.p) modal.draft.p = newProgDraft(); renderLayer(); },
+    'sp-pmode': el => { spDraftRead(); modal.draft.p.mode = el.dataset.m; renderLayer(); },
+    'pg-madd': () => { spDraftRead(); const p = modal.draft.p; p.marks.push({ name: tt('第 # 章').replace('#', p.marks.length + 1), at: '', amt: '', type: 'min' }); renderLayer(); },
+    'pg-mrm': el => { spDraftRead(); modal.draft.p.marks.splice(+el.dataset.i, 1); renderLayer(); },
+    'pg-iadd': () => { spDraftRead(); modal.draft.p.items.push({ name: '', amt: '', type: 'min' }); renderLayer(); },
+    'pg-irm': el => { spDraftRead(); modal.draft.p.items.splice(+el.dataset.i, 1); renderLayer(); },
+    'pg-gen': () => {
+      spDraftRead(); const p = modal.draft.p, n = Math.min(200, Math.round(Number(p.gn))), a = Math.round(Number(p.ga));
+      if (!(n > 0)) { $('#merr').textContent = tt('"一共几条"要填大于 0 的数字。'); return; }
+      const keep = p.items.filter(x => x.done || (x.name || '').trim()), start = keep.length;
+      for (let i = 1; i <= n; i++) keep.push({ name: tt(p.gf).replace('#', start + i), amt: a > 0 ? String(a) : '', type: p.gt });
+      p.items = keep; renderLayer();
+    },
+    'pg-open': el => { modal = { type: 'prog', gid: el.dataset.id }; renderLayer(); },
+    'pg-cell': el => { modal = { type: 'sp-confirm', step: 'ask', gid: el.dataset.id, prog: { gid: el.dataset.id, to: +el.dataset.to }, n: 1 + Math.floor(Math.random() * SPRITES) }; renderLayer(); },
+    'pg-jump': el => {
+      const g = S.specials.find(x => x.id === el.dataset.id), v = Math.round(Number($('#pg-to').value)); if (!g) return;
+      if (!(v > g.cur)) { $('#merr').textContent = tt('要填比现在的进度（#）大的数字。').replace('#', g.cur); return; }
+      modal = { type: 'sp-confirm', step: 'ask', gid: g.id, prog: { gid: g.id, to: Math.min(v, g.total) }, n: 1 + Math.floor(Math.random() * SPRITES) }; renderLayer();
+    },
+    'pg-tick': el => { modal = { type: 'sp-confirm', step: 'ask', gid: el.dataset.id, prog: { gid: el.dataset.id, iid: el.dataset.i }, n: 1 + Math.floor(Math.random() * SPRITES) }; renderLayer(); },
+    'sp-add': () => { modal = { type: 'sp-new', draft: { kind: 'normal', p: newProgDraft(), name: '', date: '', gap: false, gapDays: '3', gapAmt: '', gapType: 'min', bonus: '', bonusType: 'min', items: [{ name: '', amt: '', type: 'min', cond: '', showCond: false }] } }; renderLayer(); },
     'sp-more': () => { spDraftRead(); modal.draft.items.push({ name: '', amt: '', type: 'min', cond: '', showCond: false }); renderLayer(); const n = modal.draft.items.length - 1, el = $('#sp-n' + n); if (el) el.focus(); },
     'sp-rm': el => { spDraftRead(); modal.draft.items.splice(Number(el.dataset.i), 1); renderLayer(); },
     'sp-cond': el => { spDraftRead(); modal.draft.items[Number(el.dataset.i)].showCond = true; renderLayer(); const c = $('#sp-c' + el.dataset.i); if (c) c.focus(); },
@@ -1262,6 +1482,7 @@
     'sp-done': el => { modal = { type: 'sp-confirm', step: 'ask', gid: el.dataset.g, iid: el.dataset.i, n: 1 + Math.floor(Math.random() * SPRITES) }; renderLayer(); },
     'sp-edit': el => {
       const g = S.specials.find(x => x.id === el.dataset.id); if (!g) return;
+      if (L.isProgress(g)) { modal = { type: 'sp-new', editId: g.id, draft: { kind: 'progress', lockMode: true, p: progDraftFrom(g), items: [] } }; renderLayer(); return; }
       const amt = (min, tix) => String(tix || min || ''), typ = (min, tix) => (tix ? 'tix' : 'min');
       modal = { type: 'sp-new', editId: g.id, draft: {
         name: g.name || '', date: g.date || '', repeat: g.repeat === 'daily', gap: g.repeat === 'gap',

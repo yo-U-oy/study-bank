@@ -246,7 +246,7 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .tiles.two{grid-template-columns:repeat(2,1fr)}
 .tiles span{display:block;font-size:13px;color:var(--muted)}
 .tiles b{font-size:20px;font-weight:500;font-family:var(--body);font-variant-numeric:tabular-nums}
-.segctl{display:inline-flex;border:1px solid var(--line-hi);border-radius:4px;overflow:hidden}
+.segctl{display:inline-flex;border:1px solid var(--line-hi);border-radius:4px;overflow:hidden;flex-shrink:0}
 .segctl button{padding:0 20px;min-height:40px;color:var(--muted);font-family:var(--display)}
 .segctl button[aria-pressed="true"]{background:var(--panel-2);color:var(--brass-hi)}
 .split{display:flex;gap:2px;height:12px}
@@ -324,6 +324,20 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @keyframes slideok{0%{box-shadow:0 0 0 rgba(240,211,142,0)}40%{box-shadow:0 0 40px rgba(240,211,142,.8)}100%{box-shadow:0 0 0 rgba(240,211,142,0)}}
 @keyframes shine{from{background-position:100% 0}to{background-position:0 0}}
 .cheer .ctier.tA{color:var(--brass-hi);text-shadow:0 0 18px rgba(240,211,142,.6)}
+/* 进度型特别任务 */
+.progopen{display:flex;flex-direction:column;gap:6px;width:100%;background:none;border:0;padding:4px 0 0;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.progbar{height:8px;border-radius:4px;background:#0f0c0a;border:1px solid var(--line);overflow:hidden}
+.progbar span{display:block;height:100%;background:linear-gradient(90deg,var(--brass),var(--brass-hi));transition:width .4s}
+.spcard.prog.done .progbar span{background:var(--ok)}
+.cells{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px}
+.cell{min-height:40px;border-radius:4px;border:1px solid var(--line);background:#0f0c0a;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums;cursor:pointer}
+.cell.done{background:rgba(110,170,110,.18);border-color:rgba(110,170,110,.5);color:var(--ok)}
+.cell.next{border-color:var(--brass-hi);color:var(--brass-hi);box-shadow:0 0 0 1px var(--brass-hi) inset}
+.cell:disabled{cursor:default}
+.progrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px dashed rgba(122,95,54,.45)}
+.progrow .pmark{width:16px;text-align:center;color:var(--brass-hi);flex:none}
+.progrow.done{color:var(--muted)} .progrow.done .pmark{color:var(--ok)}
+.progrow.now{color:var(--brass-hi)}
 /* 设置页折叠板块 */
 details.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:32px}
 details.fold>summary::-webkit-details-marker{display:none}

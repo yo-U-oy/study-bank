@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.13.0', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.14.0', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -55,6 +55,7 @@
   const SPRITES = 11, spr = n => 'sprites/c' + n + '.png';
   const MATES = (window.LANG === 'en' && window.VOICES_EN) || window.VOICES || [];
   // 系统自带的名字（游戏时间、自由学习、默认任务）按界面语言显示；用户自己起的名字不翻译
+  const creditName = sc => ({ great: tt('优秀'), good: tt('良好'), watch: tt('注意'), paused: tt('暂停借款') })[L.creditTier(sc)];
   const nm = n => (n === '游戏时间' || n === '自由学习') ? tt(n) : n;
   function localizeDefaults(st) { st.tasks.forEach(x => { x.name = tt(x.name); }); (st.specials || []).forEach(g => g.items.forEach(i => { i.name = tt(i.name); })); return st; }
   // 同一状态下每 10 分钟换一句，避免每分钟刷新时台词乱跳
@@ -283,7 +284,12 @@
     render();
   }
   function checkRollover(now) {
-    if (S.today.key !== L.dayKey(now) || S.week.key !== L.weekKey(now)) { L.rollover(S, now); S.undo = null; S.timerBase = null; save(); return true; }
+    if (S.today.key !== L.dayKey(now) || S.week.key !== L.weekKey(now)) {
+      const rank = sc => ['paused', 'watch', 'good', 'great'].indexOf(L.creditTier(sc)), before = rank(L.ensureCredit(S).score);
+      L.rollover(S, now); S.undo = null; S.timerBase = null; save();
+      if (rank(S.credit.score) > before) setTimeout(() => toast(tt('信用升到了「#」。').replace('#', creditName(S.credit.score)), 6000), 1200);
+      return true;
+    }
     return false;
   }
 
@@ -306,7 +312,9 @@
     const now = Date.now();
     // 余额用完或欠着时也可以玩（借着玩），先确认一次；玩的时间全部记成欠账
     if (kind === 'play' && S.bank <= 0 && !borrowOk) {
-      confirmBox(tt('借着玩？'), (S.bank < 0 ? tt('现在的余额：') + fmtMin(S.bank) + tt('。') : tt('现在没有游戏时间了。')) + tt('这次玩的时间会记成欠账，之后学习和抽奖得到的时间会先用来还账。每玩 30 分钟提醒你一次。'), tt('借着玩'), () => startTimer(kind, task, true));
+      const cb = L.canBorrow(S);
+      if (!cb.ok) { modal = { type: 'info', title: tt('暂时不能借着玩'), html: (cb.why === 'paused' ? tt('最近一段时间一直欠着，信用到了「暂停借款」。') : tt('信用在「注意」时，最多欠到 2 小时，现在已经到了。')) + '<br>' + tt('学习、抽奖还一部分账就能再借。把欠账全部还清，信用会一下子回升很多。有余额的时候随时都能玩。') }; renderLayer(); return; }
+      confirmBox(tt('借着玩？'), (S.bank < 0 ? tt('现在的余额：') + fmtMin(S.bank) + tt('。') : tt('现在没有游戏时间了。')) + tt('这次玩的时间会记成欠账，之后学习和抽奖得到的时间会先用来还账。每玩 2 小时提醒你一次。'), tt('借着玩'), () => startTimer(kind, task, true));
       return;
     }
     const borrow = kind === 'play' && S.bank <= 0;
@@ -430,7 +438,7 @@
   }
   function checkRemind(now) {
     const t = S && S.timer; if (!t || t.kind !== 'play' || t.paused) return;
-    if (t.borrow) { const k = Math.floor(L.elapsedSec(t, now) / 1800); if (k > remind.over) { remind.over = k; alarmOpen(tt('已经借着玩了 # 分钟').replace('#', k * 30), tt('这些时间都会记成欠账。想停的话就点结束。')); } return; }
+    if (t.borrow) { const k = Math.floor(L.elapsedSec(t, now) / 7200); if (k > remind.over) { remind.over = k; alarmOpen(tt('已经借着玩了 # 小时').replace('#', k * 2), tt('这些时间都会记成欠账。想停的话就点结束。')); } return; }
     const leftSec = S.bank * 60 - L.elapsedSec(t, now);
     if (leftSec <= 600 && !remind.a) { remind.a = true; if (leftSec > 0) { beep(2); toast(tt('游戏时间只剩 ') + Math.max(1, Math.ceil(leftSec / 60)) + tt(' 分钟了。'), 9000); } }
     if (leftSec <= 0 && !remind.b) { remind.b = true; remind.a = true; remind.over = Math.floor(-leftSec / 300); alarmOpen(tt('游戏时间用完了'), tt('继续玩的部分会记成欠账。')); }
@@ -488,6 +496,7 @@
       tt('<div class="row spread"><span class="label">剩余游戏时间') + (S.settings.bankCapMin > 0 ? tt('（最多存 ') + fmtMin(S.settings.bankCapMin) + tt('）') : '') + tt('</span><span class="small muted">抽奖券 <strong class="num" style="color:var(--brass-hi);font-size:18px">') + S.tickets + tt('</strong> 张</span></div>') +
       '<div class="amount">' + (S.bank < 0 ? tt('<small style="margin-left:0">欠</small>') : '') + Math.floor(Math.abs(S.bank) / 60) + tt('<small>小时</small>') + (Math.abs(S.bank) % 60) + tt('<small>分钟</small></div>') +
       (S.bank < 0 ? tt('<p class="small muted" style="margin:0">之后抽到的游戏时间会先用来还账。</p>') : '') +
+      '<button class="creditline tier-' + L.creditTier(L.ensureCredit(S).score) + '" data-act="credit">' + tt('信用') + ' <b class="num">' + S.credit.score + '</b> · ' + creditName(S.credit.score) + ' <span aria-hidden="true">&#8250;</span></button>' +
       '<div class="row">' +
       '<button class="btn primary" data-act="play"' + (t ? ' disabled' : '') + tt('>开始游戏计时</button>') +
       tt('<button class="btn ghost" data-act="deduct">手动扣除</button></div></section>');
@@ -1098,6 +1107,19 @@
     }
     if (m.type === 'sp-confirm') return spConfirmHtml(m);
     if (m.type === 'sp-new') b = spNewHtml(m);
+    else if (m.type === 'info') b = '<h3>' + m.title + '</h3><p style="margin:0">' + m.html + '</p><div class="row"><button class="btn primary" data-act="m-close">' + tt('知道了') + '</button></div>';
+    else if (m.type === 'credit') {
+      const c = L.ensureCredit(S), tier = L.creditTier(c.score);
+      const desc = { great: tt('还款记录很好，可以随时借着玩。'), good: tt('可以随时借着玩。'), watch: tt('还能借，但最多欠到 2 小时。'), paused: tt('欠着的时候暂时不能借，先还一部分就好。') }[tier];
+      b = '<h3>' + tt('信用') + ' <span class="num">' + c.score + '</span> · ' + creditName(c.score) + '</h3><p style="margin:0">' + desc + '</p>' +
+        '<div class="credmeter"><span style="width:' + c.score + '%"></span></div>' +
+        '<p class="small muted" style="margin:0">' + tt('信用只看最近的还款情况：偶尔玩多了没关系，一直欠着、越欠越多才会变低。它只影响能不能借，不会扣你已经拿到的东西。') + '</p>' +
+        '<h3 style="font-size:15px;margin:4px 0 0">' + tt('每天凌晨 4:00 按前一天结束时的余额计算') + '</h3><ul class="small credlist">' +
+        '<li>' + tt('没有欠账：+3') + '</li><li>' + tt('欠着，但比前一天少了：+1') + '</li><li>' + tt('欠着，而且没有变少：−2') + '</li><li>' + tt('欠超过 3 小时：再 −2') + '</li><li>' + tt('把欠账全部还清的那天：再 +10') + '</li></ul>' +
+        '<h3 style="font-size:15px;margin:4px 0 0">' + tt('等级') + '</h3><ul class="small credlist">' +
+        '<li>' + tt('80–100 优秀：随时可以借') + '</li><li>' + tt('50–79 良好：随时可以借') + '</li><li>' + tt('30–49 注意：最多欠到 2 小时') + '</li><li>' + tt('0–29 暂停借款：欠着时不能开始游戏，有余额时照常玩') + '</li></ul>' +
+        '<div class="row"><button class="btn primary" data-act="m-close">' + tt('知道了') + '</button></div>';
+    }
     else if (m.type === 'confirm') b = '<h3>' + m.title + '</h3><p style="margin:0">' + m.html + '</p><div class="row"><button class="btn primary" data-act="m-ok">' + m.okLabel + tt('</button><button class="btn ghost" data-act="m-close">取消</button></div>');
     else if (m.type === 'adjust') b = tt('<h3>这次计时超过 3 小时</h3><p style="margin:0">计时器显示 ') + fmtMin(Math.floor(m.sec / 60)) + tt('。如果中途忘了停，可以改成实际的分钟数。</p><label class="field">实际分钟数<input type="number" inputmode="numeric" min="0" id="adj" value="') + Math.floor(m.sec / 60) + tt('"></label><div class="row"><button class="btn primary" data-act="m-adjust">确认并结束</button><button class="btn ghost" data-act="m-close">继续计时</button></div>');
     else if (m.type === 'deduct') b = tt('<h3>手动扣除游戏时间</h3><p class="muted small" style="margin:0">忘记开计时就玩了的时候用。现在余额 ') + fmtMin(S.bank) + tt('。</p><label class="field">扣除分钟数<input type="number" inputmode="numeric" min="1" id="ded"></label><p class="small" id="merr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="m-deduct">扣除</button><button class="btn ghost" data-act="m-close">取消</button></div>');
@@ -1219,6 +1241,7 @@
     collapse: el => { collapsed[el.dataset.g] = !collapsed[el.dataset.g]; renderMain(); },
     add: el => { modal = { type: 'task', id: null, task: L.newTask('', '', el.dataset.g) }; renderLayer(); const n = $('#t-name'); if (n) n.focus(); },
     edit: el => { const x = S.tasks.find(q => q.id === el.dataset.id); if (!x) return; const view = Object.assign({}, x); modal = { type: 'task', id: x.id, task: view }; renderLayer(); },
+    credit: () => { modal = { type: 'credit' }; renderLayer(); },
     deduct: () => { modal = { type: 'deduct' }; renderLayer(); const n = $('#ded'); if (n) n.focus(); },
     'ov-open': () => { overlayOpen = true; renderLayer(); },
     'ov-close': () => { overlayOpen = false; renderLayer(); },
@@ -1250,7 +1273,7 @@
       });
     },
     'alarm-stop': () => { alarmClose(); stopTimer(); },
-    'alarm-snooze': () => { alarmClose(); toast(S.timer && S.timer.borrow ? tt('好，再玩 30 分钟时会再提醒一次。') : tt('好，超出 5 分钟时会再提醒一次。'), 5000); },
+    'alarm-snooze': () => { alarmClose(); toast(S.timer && S.timer.borrow ? tt('好，再玩 2 小时会再提醒一次。') : tt('好，超出 5 分钟时会再提醒一次。'), 5000); },
     draw1: () => doDraw(1), drawall: () => doDraw(S.tickets),
     undo: askUndo, abandon: abandonTimer,
     'stat-mode': el => { stat.mode = el.dataset.m; stat.off = 0; renderMain(); },

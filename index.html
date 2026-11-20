@@ -324,6 +324,13 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @keyframes slideok{0%{box-shadow:0 0 0 rgba(240,211,142,0)}40%{box-shadow:0 0 40px rgba(240,211,142,.8)}100%{box-shadow:0 0 0 rgba(240,211,142,0)}}
 @keyframes shine{from{background-position:100% 0}to{background-position:0 0}}
 .cheer .ctier.tA{color:var(--brass-hi);text-shadow:0 0 18px rgba(240,211,142,.6)}
+/* 信用 */
+.creditline{align-self:flex-start;background:none;border:1px solid var(--line);border-radius:999px;padding:4px 12px;color:var(--muted);font-size:13px;cursor:pointer;min-height:32px}
+.creditline b{color:var(--text)}
+.creditline.tier-great b{color:#7bd389}.creditline.tier-watch b{color:var(--brass-hi)}.creditline.tier-paused b{color:var(--warn)}
+.credmeter{height:8px;border-radius:4px;background:#0f0c0a;border:1px solid var(--line);overflow:hidden}
+.credmeter span{display:block;height:100%;background:linear-gradient(90deg,var(--warn),var(--brass) 45%,#7bd389)}
+.credlist{margin:0;padding-left:18px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
 /* 设置页奖励数值：分组，每项一行 */
 .setgroup{display:flex;flex-direction:column}
 .setgroup h3{font-size:14px;color:var(--brass);margin:6px 0 2px;letter-spacing:.08em}

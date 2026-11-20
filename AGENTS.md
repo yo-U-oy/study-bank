@@ -64,6 +64,7 @@ Claude 版的 `index.html` 没有 PWA 部分，其余与独立版相同。
 - **数据结构向后兼容**：state 有版本号 `v`（当前 7；第 5 版加入特别任务 `state.specials`，第 6 版把临时任务并入特别任务，第 7 版加入修改排队 `state.scheduled` 和任务的 `startDate / endDate`，去掉了 `pendingSettings`、任务的 `pending / activeFrom / endAt`）。改数据结构时在 `logic.js` 的 `migrate()` 里加升级步骤，不要让旧数据读不出来。
 - **日界线**：东京时间凌晨 4:00 算新的一天，每周从周一开始（`dayKey` / `weekKey`）。
 - **修改都要问生效时间（1.12.0 起）**：改奖励数值 / 奖池、增删改任务、增删改特别任务时，都要显示「什么时候生效？」（`whenHtml` / `readWhen`），选项是立即（默认）、下周一、自选日期。以后的日子用 `L.schedule()` 放进 `state.scheduled` 排队，换日时 `applyScheduled()` 按日期先后执行，可以排多条，设置页「准备生效的修改」可以取消。这是作者要求的：给自己时间适应新规则，防止一时冲动改规则。新增可修改的东西时也要接上这套。
+- **信用与借着玩（1.13.0 / 1.14.0 起）**：余额 <= 0 时也能开始游戏计时（先确认），按 `logic.js` 的 `canBorrow()` 判断能不能借。信用 `state.credit = { score, day, prevBank }`（可选字段，没有时 `ensureCredit()` 从 70 分建起），每天换日时 `updateCredit()` 按前一天结束时的余额加减分。设计原则：只看还款趋势，掉得慢、涨得快，只限制借，不扣已经拿到的东西；信用上升会提示，下降不弹提示。借着玩每 2 小时提醒一次（作者觉得更频繁会焦虑）。
 - **撤销**：每个操作前保存快照（`S.undo`），流水条目带操作编号 `a`。抽奖不能撤销。
 - **任务分组**：每日、每周、非必要三组在 `logic.js` 的 `GROUPS`；特别任务单独存放在 `state.specials`，在学习页显示在每日下面。
 - **特别任务**：规则在 `logic.js` 的 `newSpecial / specialVisible / completeSpecial`；每天重复的特别任务用 `repeat: 'daily'`，完成状态按天记在 `doneDay`，`date` 表示开始日期。完成必须经过两步确认（点完成 → 同伴询问 + 滑动到底），这是作者特意要求的，不要简化成一键完成。

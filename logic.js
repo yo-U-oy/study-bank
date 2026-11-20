@@ -53,7 +53,7 @@
     const st = {
       v: 7, specials: [], scheduled: [], created: dayKey(now), bank: 55, tickets: 0, pity: 0, seq: names.length,
       tasks: names.map((n, i) => newTask('t' + (i + 1), n[0], n[1])),
-      settings: defaultSettings(), timer: null,
+      settings: defaultSettings(), timer: null, credit: { score: CREDIT_START, day: dayKey(now), prevBank: 55 },
       today: freshDay(dayKey(now)), week: freshWeek(weekKey(now)),
     };
     newSpecial(st, { items: [{ name: '完成一件今天想做的事', tix: 1 }] }, now);
@@ -88,10 +88,42 @@
   }
   function taskDone(state, task) { return taskCount(state, task) >= Math.max(1, task.target || 1); }
 
+  // ---------- 信用（借着玩）----------
+  // 只看还款趋势：每天 4:00 换日时，按前一天结束时的余额加减分。掉得慢、涨得快；只限制借，不扣已经拿到的东西
+  // 没欠 +3；欠着但比前一天少 +1；欠着没变少 -2；欠超过 3 小时再 -2；欠账还清的那天再 +10。分数 0–100，从 70 开始
+  const CREDIT_START = 70;
+  function ensureCredit(state) {
+    if (!state.credit || typeof state.credit.score !== 'number') state.credit = { score: CREDIT_START, day: state.today ? state.today.key : null, prevBank: state.bank || 0 };
+    return state.credit;
+  }
+  function creditTier(score) { return score >= 80 ? 'great' : score >= 50 ? 'good' : score >= 30 ? 'watch' : 'paused'; }
+  function creditDay(c, endBank) {
+    let d = endBank >= 0 ? 3 : (endBank > c.prevBank ? 1 : -2);
+    if (endBank < -180) d -= 2;
+    if (c.prevBank < 0 && endBank >= 0) d += 10;
+    c.score = Math.max(0, Math.min(100, c.score + d)); c.prevBank = endBank;
+  }
+  function updateCredit(state, now) {
+    const c = ensureCredit(state), today = dayKey(now);
+    if (!c.day) { c.day = today; c.prevBank = state.bank; return; }
+    if (c.day >= today) return;
+    const n = Math.min(7, Math.round((Date.parse(today) - Date.parse(c.day)) / DAY)); // 很多天没打开，最多补算 7 天
+    for (let i = 0; i < n; i++) creditDay(c, state.bank);
+    c.day = today;
+  }
+  // 能不能借着玩：只在余额 <= 0 时才需要问
+  function canBorrow(state) {
+    const tier = creditTier(ensureCredit(state).score);
+    if (tier === 'paused') return { ok: false, why: 'paused' };
+    if (tier === 'watch' && state.bank <= -120) return { ok: false, why: 'limit' };
+    return { ok: true };
+  }
+
   // 换日 / 换周：重置进度，然后执行到期的"准备生效"修改
   function rollover(state, now) {
     let changed = false;
     const dk = dayKey(now), wk = weekKey(now);
+    if (state.today.key !== dk) updateCredit(state, now);
     if (state.today.key !== dk) { state.today = freshDay(dk); changed = true; }
     if (state.week.key !== wk) { state.week = freshWeek(wk); changed = true; }
     if (applyScheduled(state, now)) changed = true;
@@ -330,6 +362,6 @@
     return g;
   }
 
-  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward, updateSpecial, isEnded, schedule, cancelScheduled, applyScheduled };
+  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward, updateSpecial, isEnded, schedule, cancelScheduled, applyScheduled, ensureCredit, creditTier, updateCredit, canBorrow };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Logic = api;
 })(typeof window !== 'undefined' ? window : globalThis);

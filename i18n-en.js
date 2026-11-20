@@ -216,4 +216,8 @@ window.I18N_EN = {
   '结束日期不能早于开始日期。': 'The end date cannot be before the start date.',
   '取消排队的修改': 'Cancel scheduled change', '已取消这条修改。': 'That change was cancelled.',
   '学习时长': 'Study time', '启动奖': 'Starter bonus', '任务完成': 'Task completion', '余额与抽奖': 'Balance and draws',
+  '借着玩？': 'Play on credit?', '现在的余额：': 'Current balance: ', '现在没有游戏时间了。': 'You have no game time left.',
+  '这次玩的时间会记成欠账，之后学习和抽奖得到的时间会先用来还账。每玩 30 分钟提醒你一次。': ' The time you play will be recorded as debt, and game time you earn later pays it off first. You will get a reminder every 30 minutes.',
+  '借着玩': 'Play on credit', '已经借着玩了 # 分钟': 'Played on credit for # min', '这些时间都会记成欠账。想停的话就点结束。': 'This time is recorded as debt. Tap Finish when you want to stop.',
+  '好，再玩 30 分钟时会再提醒一次。': 'OK, I will remind you again in 30 minutes.',
 };

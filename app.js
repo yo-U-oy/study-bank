@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.12.1', APP_DATE = '2026-11-19'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.13.0', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -301,17 +301,22 @@
   /* ---------- 计时 ---------- */
   function liveExtra(now) { const t = S.timer; return t && t.kind === 'study' ? Math.max(0, L.elapsedSec(t, now) - t.committed) : 0; }
 
-  function startTimer(kind, task) {
+  function startTimer(kind, task, borrowOk) {
     if (S.timer) { toast(tt('已经有一个计时在进行，先把它结束。')); overlayOpen = true; renderLayer(); return; }
     const now = Date.now();
-    if (kind === 'play' && S.bank <= 0) { toast(S.bank < 0 ? tt('现在欠 ') + fmtMin(-S.bank).slice(2) + tt('。先学习、抽奖把账还上再玩。') : tt('没有游戏时间了。每学习 ') + S.settings.segMin + tt(' 分钟可以拿到一张抽奖券。')); return; }
-    if (kind === 'play') { remind = { a: false, b: false, over: 0 }; try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) {} }
+    // 余额用完或欠着时也可以玩（借着玩），先确认一次；玩的时间全部记成欠账
+    if (kind === 'play' && S.bank <= 0 && !borrowOk) {
+      confirmBox(tt('借着玩？'), (S.bank < 0 ? tt('现在的余额：') + fmtMin(S.bank) + tt('。') : tt('现在没有游戏时间了。')) + tt('这次玩的时间会记成欠账，之后学习和抽奖得到的时间会先用来还账。每玩 30 分钟提醒你一次。'), tt('借着玩'), () => startTimer(kind, task, true));
+      return;
+    }
+    const borrow = kind === 'play' && S.bank <= 0;
+    if (kind === 'play') { remind = borrow ? { a: true, b: true, over: 0 } : { a: false, b: false, over: 0 }; try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) {} }
     const mode = task ? task.mode : 'up';
     S.timerBase = begin(tt('计时')); S.undo = null;
     S.timer = {
       kind, taskId: task ? task.id : null, name: kind === 'play' ? '游戏时间' : task ? task.name : '自由学习',
       target: kind === 'study' && task ? (mode === 'down' ? task.downMin : mode === 'pomo' ? 25 : 0) : 0,
-      began: now, startedAt: now, acc: 0, paused: false, committed: 0, device: DEVICE,
+      began: now, startedAt: now, acc: 0, paused: false, committed: 0, device: DEVICE, borrow,
     };
     lastCheckMin = -1; overlayOpen = true; save(); render();
   }
@@ -425,6 +430,7 @@
   }
   function checkRemind(now) {
     const t = S && S.timer; if (!t || t.kind !== 'play' || t.paused) return;
+    if (t.borrow) { const k = Math.floor(L.elapsedSec(t, now) / 1800); if (k > remind.over) { remind.over = k; alarmOpen(tt('已经借着玩了 # 分钟').replace('#', k * 30), tt('这些时间都会记成欠账。想停的话就点结束。')); } return; }
     const leftSec = S.bank * 60 - L.elapsedSec(t, now);
     if (leftSec <= 600 && !remind.a) { remind.a = true; if (leftSec > 0) { beep(2); toast(tt('游戏时间只剩 ') + Math.max(1, Math.ceil(leftSec / 60)) + tt(' 分钟了。'), 9000); } }
     if (leftSec <= 0 && !remind.b) { remind.b = true; remind.a = true; remind.over = Math.floor(-leftSec / 300); alarmOpen(tt('游戏时间用完了'), tt('继续玩的部分会记成欠账。')); }
@@ -1244,7 +1250,7 @@
       });
     },
     'alarm-stop': () => { alarmClose(); stopTimer(); },
-    'alarm-snooze': () => { alarmClose(); toast(tt('好，超出 5 分钟时会再提醒一次。'), 5000); },
+    'alarm-snooze': () => { alarmClose(); toast(S.timer && S.timer.borrow ? tt('好，再玩 30 分钟时会再提醒一次。') : tt('好，超出 5 分钟时会再提醒一次。'), 5000); },
     draw1: () => doDraw(1), drawall: () => doDraw(S.tickets),
     undo: askUndo, abandon: abandonTimer,
     'stat-mode': el => { stat.mode = el.dataset.m; stat.off = 0; renderMain(); },

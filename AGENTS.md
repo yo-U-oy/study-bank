@@ -30,17 +30,12 @@
 | `manifest.webmanifest`、`icons/` | PWA（添加到主屏幕）用的名称和图标 |
 | `sprites/c1..c11.png` | 同伴立绘，顺序与 `voices.js` 一致 |
 
-## 3. 两个运行环境
+## 3. 运行环境与数据
 
-同一份 `app.js` 在两个地方运行：
-
-1. **Claude 版（已停止更新，停在 1.8.0）**：作为 Claude artifact 发布（slug `e395d7a6-f249-4970-bdf7-9e060d4ba4c0`）。通过 `window.claude.use('db')` 使用云端数据库，路径 `data/users/<uid>/state` 和 `.../state/logs/<YYYY-MM-DD>`。作者已经搬到独立版，**不要再把新版本发布到这个 artifact**，那里的旧数据保持原样。
-2. **独立版（作者日常使用）**：GitHub Pages，`https://yo-u-oy.github.io/study-bank/`。没有 `window.claude` 时自动改用 `localStorage`（键：`bank-local-state`、`bank-local-logs`）。数据只在这台设备的浏览器里。
-
-3. **同步到 GitHub（只在独立版，1.7.0 起）**：设置里填入作者自己的私有仓库和钥匙（fine-grained token，只给那一个仓库的 Contents 读写权限）后，记账约 30 秒后把 `{app, v, exported, state, logs}`（与导出备份同格式）上传为仓库里的 `data.json`，每次上传是一个提交。配置存在 localStorage 的 `bank-gh-sync`，不进 state、不进备份。AI 需要看独立版的流水时，读那个私有仓库的 `data.json`。目前只上传，不从仓库下载。
-
-`app.js` 里用变量 `cloud` 区分两者。界面文字要对两种情况都成立。
-Claude 版的 `index.html` 没有 PWA 部分，其余与独立版相同。
+- 网址：GitHub Pages，`https://yo-u-oy.github.io/study-bank/`，作者用手机"添加到主屏幕"当 App 用（PWA）。
+- 数据存在浏览器的 `localStorage`（键：`bank-local-state`、`bank-local-logs`），只在那台设备里。
+- **同步到 GitHub（1.7.0 起，只上传）**：设置里填入作者自己的私有仓库和令牌（fine-grained token，只给那一个仓库的 Contents 读写权限）后，记账约 30 秒后把 `{app, v, exported, state, logs}`（与导出备份同格式）上传为仓库里的 `data.json`，每次上传是一个提交。配置存在 localStorage 的 `bank-gh-sync`，不进 state、不进备份。AI 要看作者的流水、做统计时，读那个私有仓库的 `data.json`（仓库名问作者，不要写进这个公开仓库）。
+- 历史：项目最早在 Claude artifact 里开发，1.8.0 后迁出成为现在的独立网页。`app.js` 里还留着当时的云端分支（变量 `cloud`、`window.claude`、`confirmed` 保护），独立版不会走到那里；以后整理代码时可以删掉。
 
 ## 3.4 设置页
 
@@ -64,35 +59,36 @@ Claude 版的 `index.html` 没有 PWA 部分，其余与独立版相同。
 
 ## 5. 不能破坏的地方
 
-- **云端确认保护（`confirmed` 标志）**：Claude 版读取云端数据时，必须等服务器确认过的快照（`snap.metadata.fromCache === false`）才显示和保存。之前因为旧缓存覆盖新数据丢过一次余额。不要删掉这个逻辑。
+- **不要用旧数据覆盖新数据**：以前因为旧缓存覆盖新数据丢过一次余额。以后做多设备同步时，写入前要先确认远端没有更新的版本（比如 GitHub 的 `sha`）。
 - **数据结构向后兼容**：state 有版本号 `v`（当前 7；第 5 版加入特别任务 `state.specials`，第 6 版把临时任务并入特别任务，第 7 版加入修改排队 `state.scheduled` 和任务的 `startDate / endDate`，去掉了 `pendingSettings`、任务的 `pending / activeFrom / endAt`）。改数据结构时在 `logic.js` 的 `migrate()` 里加升级步骤，不要让旧数据读不出来。
 - **日界线**：东京时间凌晨 4:00 算新的一天，每周从周一开始（`dayKey` / `weekKey`）。
 - **修改都要问生效时间（1.12.0 起）**：改奖励数值 / 奖池、增删改任务、增删改特别任务时，都要显示「什么时候生效？」（`whenHtml` / `readWhen`），选项是立即（默认）、下周一、自选日期。以后的日子用 `L.schedule()` 放进 `state.scheduled` 排队，换日时 `applyScheduled()` 按日期先后执行，可以排多条，设置页「准备生效的修改」可以取消。这是作者要求的：给自己时间适应新规则，防止一时冲动改规则。新增可修改的东西时也要接上这套。
 - **信用与借着玩（1.13.0 / 1.14.0 起）**：余额 <= 0 时也能开始游戏计时（先确认），按 `logic.js` 的 `canBorrow()` 判断能不能借。信用 `state.credit = { score, day, prevBank }`（可选字段，没有时 `ensureCredit()` 从 70 分建起），每天换日时 `updateCredit()` 按前一天结束时的余额加减分。设计原则：只看还款趋势，掉得慢、涨得快，只限制借，不扣已经拿到的东西；**不要在主界面显示信用分数，也不要弹出信用相关的提示；也不要显示「还剩 N 项」这类待办计数（作者觉得有压力），只有今天截止的才提示**（作者看到分数会紧张，1.15.0 起只在设置的折叠板块「借着玩与信用」里写等级和规则）。借着玩每 2 小时提醒一次（作者觉得更频繁会焦虑）。
 - **撤销**：每个操作前保存快照（`S.undo`），流水条目带操作编号 `a`。抽奖不能撤销。
-- **任务分组**：每日、每周、非必要三组在 `logic.js` 的 `GROUPS`；特别任务单独存放在 `state.specials`，在学习页显示在每日下面。
+- **任务分组**：每日、每周、非必要三组在 `logic.js` 的 `GROUPS`；特别任务单独存放在 `state.specials`。学习页分两页（1.11.0 起）：「日常任务」放三组任务，「特别任务」单独一页，可左右滑动切换；特别任务页有「全部 / 每天 / 待办 / 长期」筛选（1.16.1 起）。
 - **特别任务**：规则在 `logic.js` 的 `newSpecial / specialVisible / completeSpecial`；每天重复的特别任务用 `repeat: 'daily'`，完成状态按天记在 `doneDay`，`date` 表示开始日期。完成必须经过两步确认（点完成 → 同伴询问 + 滑动到底），这是作者特意要求的，不要简化成一键完成。
 - **进度型特别任务（1.16.0 起）**：`kind: 'progress'`，`mode` 为 `count`（按数量：`total / step / stepMin / stepTix / cur / paid`，章节在 `marks`）或 `items`（按条目，每条在 `items`）。规则在 `logic.js` 的 `newProgress / updateProgress / progressAdvance / progressTick`；进度只能往前，改错用撤销。`date` 是开始日期，`due` 是截止日期，只用来显示，过了不扣东西、不收起。记进度也要走同伴询问 + 滑动确认（`sp-confirm` 弹窗带 `prog`）。处理特别任务的代码要先用 `L.isProgress(g)` 分开。
 - **同人声明**：设置页"关于"、`index.html` 开头注释、`README.md` 里的非官方同人声明不要删。同伴角色来自《博德之门 3》，只能免费、非商业使用。
 
 ## 6. 修改数据（不是功能）
 
-- 独立版：请作者在设置里"导出备份"，把 JSON 发给你，你改好后发回新的 JSON，作者"导入备份"。改之前提醒作者保留原文件。
-- 修改时余额 `state.bank` 和流水 `logs[日期].entries` 要一起改，保持一致。
-- Claude 版：只有 Claude 能直接改数据库。从外部直接写数据库后，要提醒作者刷新所有打开的页面，否则页面里的旧流水缓存会把修改覆盖掉。
+- 网页目前不会从 GitHub 下载数据，所以 AI 不能直接改作者手机里的数据。做法：拿私有仓库里最新的 `data.json`（或请作者导出备份），在上面修改，发回一个新的备份 JSON，请作者在设置里"导入备份"。
+- 导入会覆盖整份数据：提醒作者先更新到最新版本，导入前不要再记新的东西。先看 `data.json` 的同步时间，确认它是最新的。
+- 修改时余额 `state.bank` 和流水 `logs[日期].entries` 要一起改，保持一致。新增特别任务时用 `logic.js` 的 `newSpecial()` 生成，格式才不会错。
 - **个人数据备份文件不要提交到仓库**（`.gitignore` 已排除）。
 
 ## 7. 测试
 
 - 规则：`node -e "const L=require('./logic.js'); ..."` 直接调用 `logic.js` 的函数。
-- 界面：用浏览器打开 `index.html`（本地会进入 localStorage 模式），点"开始使用"后测试。Playwright 的 `page.clock` 可以快进时间测试计时和闹铃。
+- 界面：用浏览器打开 `index.html`，点"开始使用"后测试。Playwright 的 `page.clock` 可以快进时间测试计时、闹铃和换日。
+- 新用户的界面语言按系统语言决定：测试中文界面时把浏览器 locale 设成 `zh-CN`。特别任务在学习页第二页，测试前可以先设 `localStorage['bank-today-page'] = 'special'`；设置页的板块默认收起。
 - 测试 Service Worker 需要用 `python3 -m http.server` 在 localhost 打开。
 - 发布前确认浏览器控制台没有报错。
 
 ## 8. 路线图（作者的计划）
 
-1. 自己用得非常顺手：流水修正功能、Firebase 云端同步、正式从 Claude 版搬到独立版（进行中）。
+1. 自己用得非常顺手（基本完成）：还剩流水修正、多设备同步（考虑用 GitHub 私有仓库做双向同步）、备份提醒。
 2. 像 Anki 一样高度自定义 + 最基本的新 UI：奖励货币可自定义（分钟、小星星、奶茶等实物奖励），规则开关化，基础主题，iPad 与电脑的大屏排版。
 3. 新手引导 + 复杂精致的 UI：原创角色与动画、多档案（家长与孩子）、推送通知，之后作为作品集放到简历上。
 
-完整计划见 `ROADMAP.md`，更早的迁移分析见 `MIGRATION.md`，版本历史见 `CHANGELOG.md`。
+完整计划见 `ROADMAP.md`，版本历史见 `CHANGELOG.md`。

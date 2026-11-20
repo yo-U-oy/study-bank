@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.16.0', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.16.1', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -15,7 +15,8 @@
   const logView = () => view === 'ledger' || view === 'stats' || (view === 'draw' && !(lastDraw && lastDraw.rolling));
   let stat = { mode: 'week', off: 0, moff: 0, tip: '' };
   let remind = { a: false, b: false, over: 0 }, AC = null;
-  let todayPage = 'routine', pageAnim = '';
+  let todayPage = 'routine', pageAnim = '', spFilter = 'all', spOpen = new Set();
+  try { spFilter = localStorage.getItem('bank-sp-filter') || 'all'; spOpen = new Set(JSON.parse(localStorage.getItem('bank-sp-open') || '[]')); } catch (e) { }
   try { if (localStorage.getItem('bank-today-page') === 'special') todayPage = 'special'; } catch (e) { }
   function setTodayPage(p) {
     if (p === todayPage) return;
@@ -532,7 +533,7 @@
     h += tt('<section class="dayline"><div class="row spread small"><span>今日经验 · 已学 <strong>') + Math.floor(live / 60) + tt('</strong> 分钟 · ') + head + '</span><span class="muted">' + nextTip + '</span></div><div class="segs">' + segs + '</div></section>';
 
     // 学习页分两页：日常任务（每日、每周、非必要）和特别任务。点上方切换，或在任务区左右滑动
-    const spLeft = (S.specials || []).filter(g => L.specialVisible(g, now)).reduce((a, g) => a + L.specialLeft(g, now), 0);
+    const today0 = L.dayKey(now), spLeft = (S.specials || []).reduce((a, g) => a + (L.isProgress(g) ? (g.due === today0 && !L.progDone(g) ? 1 : 0) : (!g.repeat && g.date === today0 ? g.items.filter(x => !x.done).length : 0)), 0); // 只数今天截止、还没做的
     h += '<div class="segctl pagetabs" role="tablist">' +
       '<button role="tab" data-act="tpage" data-p="routine" aria-pressed="' + (todayPage !== 'special') + '">' + tt('日常任务') + '</button>' +
       '<button role="tab" data-act="tpage" data-p="special" aria-pressed="' + (todayPage === 'special') + '">' + tt('特别任务') + (spLeft ? ' <span class="badge num">' + spLeft + '</span>' : '') + '</button></div>';
@@ -605,18 +606,19 @@
   const rewardText = (min, tix) => [min ? '+' + min + tt(' 分钟') : '', tix ? '+' + tix + tt(' 张券') : ''].filter(Boolean).join(' ');
   function specialsHtml(now) {
     const list = (S.specials || []).filter(g => L.specialVisible(g, now)), open = !collapsed.special;
-    const left = list.reduce((a, g) => a + L.specialLeft(g, now), 0);
-    let h = tt('<section class="group" data-g="special"><div class="ghead"><h2>特别任务</h2><span class="meta">') + (list.length ? tt('还剩 ') + left + tt(' 项') : '') + '</span>' +
+    let h = tt('<section class="group" data-g="special"><div class="ghead"><h2>特别任务</h2><span class="meta">') + '</span>' +
       '<button class="icon" data-act="collapse" data-g="special" aria-label="' + (open ? tt('收起') : tt('展开')) + tt('特别任务">') + (open ? '&#8964;' : '&#8250;') + '</button>' +
       tt('<button class="icon" data-act="sp-add" aria-label="新建特别任务">+</button></div>');
     if (open) {
       const spAdds = (S.scheduled || []).filter(q => q.type === 'sp-add');
       if (!list.length && !spAdds.length) h += tt('<p class="muted small" style="margin:0 0 0 16px">想给自己定一件额外的事？点右边的 + 新建，完成后直接拿奖励。</p>');
       h += spAdds.map(q => '<p class="small muted qadd">' + tt('# 加入：').replace('#', mdLabel(q.at)) + esc(q.data.spec.name || q.data.spec.items.map(i => i.name).join(tt('、'))) + '</p>').join('');
-      list.forEach(g => {
-        if (L.isProgress(g)) { h += progCardHtml(g, now); return; }
+      const cardFor = g => {
+        let h = '';
+        if (L.isProgress(g)) return progCardHtml(g, now);
         const today = L.dayKey(now), multi = g.items.length > 1, started = L.specialStarted(g, now), allDone = started && g.items.every(x => L.specialDone(g, x, now));
         const title = g.name || (multi ? tt('特别任务') : '');
+        const folded = multi && !spOpen.has(g.id);
         let tags = '';
         if (g.repeat === 'daily') tags += tt(' <span class="tag">每天</span>') + (started ? '' : ' <span class="tag">' + tt('从#开始').replace('#', g.date === L.nextDayKey(now) ? tt('明天') : g.date.slice(5).replace('-', '/')) + '</span>');
         else if (g.repeat === 'gap') tags += tt(' <span class="tag">按间隔</span>');
@@ -624,8 +626,13 @@
         if (allDone) tags += tt(' <span class="tag ok">已完成</span>');
         queued('sp-edit', 'gid', g.id).forEach(q => { tags += ' <span class="tag">' + tt('# 修改').replace('#', mdLabel(q.at)) + '</span>'; });
         queued('sp-del', 'gid', g.id).forEach(q => { tags += ' <span class="tag">' + tt('# 删除').replace('#', mdLabel(q.at)) + '</span>'; });
+        if (folded) {
+          const nx = started ? g.items.find(x => !L.specialDone(g, x, now)) : null, nd = g.items.filter(x => L.specialDone(g, x, now)).length, rw = nx ? L.specialReward(g, nx, now) : null;
+          return '<article class="spcard compact' + (allDone ? ' done' : '') + '"><button class="spfold" data-act="sp-fold" data-id="' + g.id + '" aria-expanded="false"><b>' + esc(title) + '</b>' + tags + '<span class="grow"></span><span class="small muted num">' + nd + ' / ' + g.items.length + '</span><span class="chev" aria-hidden="true">&#8250;</span></button>' +
+            (nx ? '<div class="small muted">' + tt('下一个：') + esc(nx.name) + ' · ' + rewardText(rw.min, rw.tix) + '</div>' : '') + '</article>';
+        }
         h += '<article class="spcard' + (allDone ? ' done' : '') + '">';
-        if (title || tags) h += '<div class="sphead"><b>' + esc(title) + '</b>' + tags + '<span class="grow"></span><button class="btn sm ghost" data-act="sp-edit" data-id="' + g.id + tt('" aria-label="修改这组特别任务">修改</button><button class="icon sm" data-act="sp-del" data-id="') + g.id + tt('" aria-label="删除这组特别任务">&times;</button></div>');
+        if (title || tags) h += '<div class="sphead"><b>' + esc(title) + '</b>' + tags + '<span class="grow"></span>' + (multi ? '<button class="icon sm" data-act="sp-fold" data-id="' + g.id + '" aria-expanded="true" aria-label="' + tt('收起') + '">&#8964;</button>' : '') + '<button class="btn sm ghost" data-act="sp-edit" data-id="' + g.id + tt('" aria-label="修改这组特别任务">修改</button><button class="icon sm" data-act="sp-del" data-id="') + g.id + tt('" aria-label="删除这组特别任务">&times;</button></div>');
         g.items.forEach(x => {
           const running = S.timer && S.timer.taskId === x.id, sec = (x.sec || 0) + (running ? liveExtra(now) : 0);
           const xd = L.specialDone(g, x, now), rw = L.specialReward(g, x, now);
@@ -639,7 +646,19 @@
         const bGot = g.repeat === 'daily' ? g.bonusDay === today : g.bonusDone;
         if (multi && (g.bonusMin || g.bonusTix)) h += '<div class="spbonus small' + (bGot ? ' got' : '') + '">' + (g.repeat ? tt('每天') : '') + tt('全部完成再 <b class="num">') + rewardText(g.bonusMin, g.bonusTix) + '</b>' + (bGot ? tt('　已领取') : '') + '</div>';
         h += '</article>';
-      });
+        return h;
+      };
+      // 分类：每天（每天重复、按间隔）/ 待办（一次性）/ 长期（进度任务）；没做完的在上面、按日期排，今天做完的收在最下面
+      const cat = g => L.isProgress(g) ? 'long' : g.repeat ? 'daily' : 'todo';
+      const doneNow = g => L.isProgress(g) ? L.progDone(g) : (L.specialStarted(g, now) && g.items.every(x => L.specialDone(g, x, now)));
+      const dkey = g => (L.isProgress(g) ? g.due : (!g.repeat && g.date)) || '9999-99-99';
+      const shown = list.map((g, i) => ({ g, i })).filter(o => spFilter === 'all' || cat(o.g) === spFilter);
+      const todo = shown.filter(o => !doneNow(o.g)).sort((a, b) => dkey(a.g) < dkey(b.g) ? -1 : dkey(a.g) > dkey(b.g) ? 1 : a.i - b.i);
+      const fin = shown.filter(o => doneNow(o.g));
+      if (list.length) h += '<div class="segctl spfilter" role="tablist">' + [['all', '全部'], ['daily', '每天'], ['todo', '待办'], ['long', '长期']].map(([k, l]) => '<button role="tab" data-act="sp-filter" data-f="' + k + '" aria-pressed="' + (spFilter === k) + '">' + tt(l).trim() + '</button>').join('') + '</div>';
+      todo.forEach(o => { h += cardFor(o.g); });
+      if (list.length && !todo.length) h += '<p class="muted small" style="margin:0 0 0 16px">' + tt('这一类现在没有要做的。') + '</p>';
+      if (fin.length) h += '<details class="spfin" data-fold="spfin"' + (foldOpen.spfin ? ' open' : '') + '><summary class="small muted">' + tt('今天完成了 # 项').replace('#', fin.length) + '</summary>' + fin.map(o => cardFor(o.g)).join('') + '</details>';
     }
     return h + '</section>';
   }
@@ -1452,6 +1471,8 @@
     'ov-close': () => { overlayOpen = false; renderLayer(); },
     pause: pauseTimer, stop: stopTimer,
     tpage: el => setTodayPage(el.dataset.p),
+    'sp-filter': el => { spFilter = el.dataset.f; try { localStorage.setItem('bank-sp-filter', spFilter); } catch (e) { } renderMain(); },
+    'sp-fold': el => { const id = el.dataset.id; if (spOpen.has(id)) spOpen.delete(id); else spOpen.add(id); try { localStorage.setItem('bank-sp-open', JSON.stringify([...spOpen])); } catch (e) { } renderMain(); },
     'sp-kind': el => { spDraftRead(); modal.draft.kind = el.dataset.k; if (!modal.draft.p) modal.draft.p = newProgDraft(); renderLayer(); },
     'sp-pmode': el => { spDraftRead(); modal.draft.p.mode = el.dataset.m; renderLayer(); },
     'pg-madd': () => { spDraftRead(); const p = modal.draft.p; p.marks.push({ name: tt('第 # 章').replace('#', p.marks.length + 1), at: '', amt: '', type: 'min' }); renderLayer(); },

@@ -324,6 +324,17 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @keyframes slideok{0%{box-shadow:0 0 0 rgba(240,211,142,0)}40%{box-shadow:0 0 40px rgba(240,211,142,.8)}100%{box-shadow:0 0 0 rgba(240,211,142,0)}}
 @keyframes shine{from{background-position:100% 0}to{background-position:0 0}}
 .cheer .ctier.tA{color:var(--brass-hi);text-shadow:0 0 18px rgba(240,211,142,.6)}
+/* 特别任务：筛选、收成一行的组、今天完成的 */
+.spfilter{display:flex;width:100%}
+.spfilter button{flex:1;padding:0 6px;min-height:36px;font-size:14px}
+.spfold{display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;padding:2px 0;color:inherit;font:inherit;text-align:left;cursor:pointer;flex-wrap:wrap}
+.spfold .chev{color:var(--brass);font-size:18px;line-height:1}
+.spcard.compact{gap:4px}
+.spfin>summary{cursor:pointer;padding:6px 0 6px 16px;list-style:none}
+.spfin>summary::-webkit-details-marker{display:none}
+.spfin>summary::before{content:'\203A  ';color:var(--brass)}
+.spfin[open]>summary::before{content:'\2304  '}
+.spfin{display:flex;flex-direction:column;gap:12px}
 /* 进度型特别任务 */
 .progopen{display:flex;flex-direction:column;gap:6px;width:100%;background:none;border:0;padding:4px 0 0;color:inherit;text-align:left;cursor:pointer;font:inherit}
 .progbar{height:8px;border-radius:4px;background:#0f0c0a;border:1px solid var(--line);overflow:hidden}

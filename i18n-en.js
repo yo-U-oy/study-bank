@@ -258,4 +258,5 @@ window.I18N_EN = {
   '第 # 个章节的奖励要填大于 0 的数字。': 'Chapter # needs a reward above 0.', '至少填一种奖励：每格奖励、章节奖励或全部完成的奖励。': 'Add at least one reward: per box, per chapter, or for finishing.',
   '至少要有一条。可以用上面的': 'Add at least one item. You can use ', '第 # 章': 'Chapter #', '第 # 节课': 'Lesson #', '第 # 课': 'Lesson #', '第 # 单元': 'Unit #',
   '要填比现在的进度（#）大的数字。': 'Enter a number bigger than your current progress (#).',
+  '全部': 'All', '待办': 'To-do', '长期': 'Long-term', '这一类现在没有要做的。': 'Nothing to do in this group right now.', '今天完成了 # 项': 'Done today: #',
 };

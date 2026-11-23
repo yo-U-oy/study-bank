@@ -92,15 +92,32 @@
   // 只看还款趋势：每天 4:00 换日时，按前一天结束时的余额加减分。掉得慢、涨得快；只限制借，不扣已经拿到的东西
   // 没欠 +3；欠着但比前一天少 +1；欠着没变少 -2；欠超过 3 小时再 -2；欠账还清的那天再 +10。分数 0–100，从 70 开始
   const CREDIT_START = 70;
+  // 信用规则可以在设置里改（settings.credit）；没有设置时用默认值。三个预设：宽松 / 默认 / 严格
+  const CREDIT_PRESETS = {
+    loose: { borrow: true, useCredit: true, plusClear: 3, plusRepay: 2, minusStuck: 1, deepMin: 300, minusDeep: 1, clearBonus: 15, watchBelow: 40, pauseBelow: 20, watchLimit: 180, remindMin: 120 },
+    normal: { borrow: true, useCredit: true, plusClear: 3, plusRepay: 1, minusStuck: 2, deepMin: 180, minusDeep: 2, clearBonus: 10, watchBelow: 50, pauseBelow: 30, watchLimit: 120, remindMin: 120 },
+    strict: { borrow: true, useCredit: true, plusClear: 2, plusRepay: 1, minusStuck: 3, deepMin: 120, minusDeep: 3, clearBonus: 8, watchBelow: 60, pauseBelow: 40, watchLimit: 60, remindMin: 60 },
+  };
+  function creditCfg(state) { return Object.assign({}, CREDIT_PRESETS.normal, (state && state.settings && state.settings.credit) || {}); }
+  function creditError(c) {
+    const nums = ['plusClear', 'plusRepay', 'minusStuck', 'deepMin', 'minusDeep', 'clearBonus', 'watchBelow', 'pauseBelow', 'watchLimit', 'remindMin'];
+    if (nums.some(k => !Number.isFinite(c[k]) || c[k] < 0)) return '有一项数值为空或为负数，请检查。';
+    if (!(c.pauseBelow < c.watchBelow && c.watchBelow <= 80)) return '「暂停借款」的分数要低于「注意」，「注意」最高 80。';
+    if (c.remindMin < 10) return '提醒间隔至少 10 分钟。';
+    return '';
+  }
   function ensureCredit(state) {
     if (!state.credit || typeof state.credit.score !== 'number') state.credit = { score: CREDIT_START, day: state.today ? state.today.key : null, prevBank: state.bank || 0 };
     return state.credit;
   }
-  function creditTier(score) { return score >= 80 ? 'great' : score >= 50 ? 'good' : score >= 30 ? 'watch' : 'paused'; }
-  function creditDay(c, endBank) {
-    let d = endBank >= 0 ? 3 : (endBank > c.prevBank ? 1 : -2);
-    if (endBank < -180) d -= 2;
-    if (c.prevBank < 0 && endBank >= 0) d += 10;
+  function creditTier(score, cfg) {
+    const k = cfg || CREDIT_PRESETS.normal;
+    return score < k.pauseBelow ? 'paused' : score < k.watchBelow ? 'watch' : score >= 80 ? 'great' : 'good';
+  }
+  function creditDay(c, endBank, k) {
+    let d = endBank >= 0 ? k.plusClear : (endBank > c.prevBank ? k.plusRepay : -k.minusStuck);
+    if (endBank < -k.deepMin) d -= k.minusDeep;
+    if (c.prevBank < 0 && endBank >= 0) d += k.clearBonus;
     c.score = Math.max(0, Math.min(100, c.score + d)); c.prevBank = endBank;
   }
   function updateCredit(state, now) {
@@ -108,14 +125,18 @@
     if (!c.day) { c.day = today; c.prevBank = state.bank; return; }
     if (c.day >= today) return;
     const n = Math.min(7, Math.round((Date.parse(today) - Date.parse(c.day)) / DAY)); // 很多天没打开，最多补算 7 天
-    for (let i = 0; i < n; i++) creditDay(c, state.bank);
+    const k = creditCfg(state);
+    for (let i = 0; i < n; i++) creditDay(c, state.bank, k);
     c.day = today;
   }
   // 能不能借着玩：只在余额 <= 0 时才需要问
   function canBorrow(state) {
-    const tier = creditTier(ensureCredit(state).score);
+    const k = creditCfg(state);
+    if (!k.borrow) return { ok: false, why: 'off' };
+    if (!k.useCredit) return { ok: true };
+    const tier = creditTier(ensureCredit(state).score, k);
     if (tier === 'paused') return { ok: false, why: 'paused' };
-    if (tier === 'watch' && state.bank <= -120) return { ok: false, why: 'limit' };
+    if (tier === 'watch' && state.bank <= -k.watchLimit) return { ok: false, why: 'limit' };
     return { ok: true };
   }
 
@@ -143,7 +164,7 @@
   function cancelScheduled(state, id) { state.scheduled = (state.scheduled || []).filter(q => q.id !== id); }
   function applyOne(state, q, now) {
     const d = q.data;
-    if (q.type === 'settings') state.settings = d.settings;
+    if (q.type === 'settings') state.settings = d.patch ? Object.assign({}, state.settings, JSON.parse(JSON.stringify(d.patch))) : d.settings;
     else if (q.type === 'task-add') { state.seq = (state.seq || 0) + 1; state.tasks.push(newTask('t' + state.seq, d.name, d.group, pickFields(d))); }
     else if (q.type === 'task-edit') { const t = state.tasks.find(x => x.id === d.id); if (t) Object.assign(t, pickFields(d.fields)); }
     else if (q.type === 'task-del') state.tasks = state.tasks.filter(x => x.id !== d.id);
@@ -432,6 +453,6 @@
     return g;
   }
 
-  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward, updateSpecial, isEnded, schedule, cancelScheduled, applyScheduled, ensureCredit, creditTier, updateCredit, canBorrow, isProgress, progCells, progReached, progDone, progressAdvance, progressTick, specialLeft };
+  const api = { migrate, bankRoom, GROUPS, dayKey, weekKey, nextDayKey, nextWeekKey, defaultSettings, newTask, initialState, groupOf, periodOf, isActive, taskSec, taskCount, taskDone, rollover, addStudy, settle, manualCheck, completeTemp, draw, playCost, spend, elapsedSec, settingsError, newSpecial, specialVisible, completeSpecial, findSpecialItem, specialDone, specialStarted, specialGap, specialReward, updateSpecial, isEnded, schedule, cancelScheduled, applyScheduled, ensureCredit, creditTier, updateCredit, canBorrow, creditCfg, creditError, CREDIT_PRESETS, isProgress, progCells, progReached, progDone, progressAdvance, progressTick, specialLeft };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Logic = api;
 })(typeof window !== 'undefined' ? window : globalThis);

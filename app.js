@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.16.2', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.16.3', APP_DATE = '2026-11-23'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -55,7 +55,7 @@
   const SPRITES = 11, spr = n => 'sprites/c' + n + '.png';
   const MATES = (window.LANG === 'en' && window.VOICES_EN) || window.VOICES || [];
   // 系统自带的名字（游戏时间、自由学习、默认任务）按界面语言显示；用户自己起的名字不翻译
-  const creditName = sc => ({ great: tt('优秀'), good: tt('良好'), watch: tt('注意'), paused: tt('暂停借款') })[L.creditTier(sc)];
+  const creditName = sc => ({ great: tt('优秀'), good: tt('良好'), watch: tt('注意'), paused: tt('暂停借款') })[L.creditTier(sc, L.creditCfg(S))];
   const nm = n => (n === '游戏时间' || n === '自由学习') ? tt(n) : n;
   function localizeDefaults(st) { st.tasks.forEach(x => { x.name = tt(x.name); }); (st.specials || []).forEach(g => g.items.forEach(i => { i.name = tt(i.name); })); return st; }
   // 同一状态下每 10 分钟换一句，避免每分钟刷新时台词乱跳
@@ -267,8 +267,8 @@
     // 余额用完或欠着时也可以玩（借着玩），先确认一次；玩的时间全部记成欠账
     if (kind === 'play' && S.bank <= 0 && !borrowOk) {
       const cb = L.canBorrow(S);
-      if (!cb.ok) { modal = { type: 'info', title: tt('暂时不能借着玩'), html: (cb.why === 'paused' ? tt('最近一段时间一直欠着，信用到了「暂停借款」。') : tt('信用在「注意」时，最多欠到 2 小时，现在已经到了。')) + '<br>' + tt('学习、抽奖还一部分账就能再借。把欠账全部还清，信用会一下子回升很多。有余额的时候随时都能玩。') }; renderLayer(); return; }
-      confirmBox(tt('借着玩？'), (S.bank < 0 ? tt('现在的余额：') + fmtMin(S.bank) + tt('。') : tt('现在没有游戏时间了。')) + tt('这次玩的时间会记成欠账，之后学习和抽奖得到的时间会先用来还账。每玩 2 小时提醒你一次。'), tt('借着玩'), () => startTimer(kind, task, true));
+      if (!cb.ok) { modal = { type: 'info', title: tt('暂时不能借着玩'), html: (cb.why === 'off' ? tt('设置里关掉了「借着玩」，余额用完时不能开始游戏。') : cb.why === 'paused' ? tt('最近一段时间一直欠着，信用到了「暂停借款」。') : tt('信用在「注意」时，最多欠到 #，现在已经到了。').replace('#', fmtMin(L.creditCfg(S).watchLimit))) + '<br>' + (cb.why === 'off' ? tt('想借的话，可以在设置的「借着玩与信用」里打开。') : tt('学习、抽奖还一部分账就能再借。把欠账全部还清，信用会一下子回升很多。有余额的时候随时都能玩。')) }; renderLayer(); return; }
+      confirmBox(tt('借着玩？'), (S.bank < 0 ? tt('现在的余额：') + fmtMin(S.bank) + tt('。') : tt('现在没有游戏时间了。')) + tt('这次玩的时间会记成欠账，之后学习和抽奖得到的时间会先用来还账。每玩 # 提醒你一次。').replace('#', fmtMin(L.creditCfg(S).remindMin)), tt('借着玩'), () => startTimer(kind, task, true));
       return;
     }
     const borrow = kind === 'play' && S.bank <= 0;
@@ -392,7 +392,7 @@
   }
   function checkRemind(now) {
     const t = S && S.timer; if (!t || t.kind !== 'play' || t.paused) return;
-    if (t.borrow) { const k = Math.floor(L.elapsedSec(t, now) / 7200); if (k > remind.over) { remind.over = k; alarmOpen(tt('已经借着玩了 # 小时').replace('#', k * 2), tt('这些时间都会记成欠账。想停的话就点结束。')); } return; }
+    if (t.borrow) { const rm = L.creditCfg(S).remindMin, k = Math.floor(L.elapsedSec(t, now) / (rm * 60)); if (k > remind.over) { remind.over = k; alarmOpen(tt('已经借着玩了 #').replace('#', fmtMin(k * rm)), tt('这些时间都会记成欠账。想停的话就点结束。')); } return; }
     const leftSec = S.bank * 60 - L.elapsedSec(t, now);
     if (leftSec <= 600 && !remind.a) { remind.a = true; if (leftSec > 0) { beep(2); toast(tt('游戏时间只剩 ') + Math.max(1, Math.ceil(leftSec / 60)) + tt(' 分钟了。'), 9000); } }
     if (leftSec <= 0 && !remind.b) { remind.b = true; remind.a = true; remind.over = Math.floor(-leftSec / 300); alarmOpen(tt('游戏时间用完了'), tt('继续玩的部分会记成欠账。')); }
@@ -515,31 +515,32 @@
   }
   /* ---------- 生效时间：每次修改都问一下（默认立即），以后的日子先排队 ---------- */
   const mdLabel = k => Number(k.slice(5, 7)) + '/' + Number(k.slice(8, 10));
-  function whenHtml(sel, date) {
-    const now = Date.now(), mon = L.nextWeekKey(now), tmr = L.nextDayKey(now), r = v => (sel || 'now') === v ? ' checked' : '';
+  function whenHtml(sel, date, pre) {
+    pre = pre || '';
+    const now = Date.now(), mon = L.nextWeekKey(now), tmr = L.nextDayKey(now), r = v => (sel || 'now') === v ? ' checked' : '', nm = pre + 'when';
     return '<fieldset class="when"><legend>' + tt('什么时候生效？') + '</legend><div class="whenopts">' +
-      '<label class="check"><input type="radio" name="when" value="now"' + r('now') + '>' + tt('立即') + '</label>' +
-      '<label class="check"><input type="radio" name="when" value="mon"' + r('mon') + '>' + tt('下周一') + tt('（') + mdLabel(mon) + tt('）') + '</label>' +
-      '<label class="check"><input type="radio" name="when" value="date"' + r('date') + '>' + tt('选日期') + '</label>' +
-      '<input type="date" id="when-date" min="' + tmr + '" value="' + esc(date || '') + '" aria-label="' + tt('生效日期') + '"></div>' +
+      '<label class="check"><input type="radio" name="' + nm + '" value="now"' + r('now') + '>' + tt('立即') + '</label>' +
+      '<label class="check"><input type="radio" name="' + nm + '" value="mon"' + r('mon') + '>' + tt('下周一') + tt('（') + mdLabel(mon) + tt('）') + '</label>' +
+      '<label class="check"><input type="radio" name="' + nm + '" value="date"' + r('date') + '>' + tt('选日期') + '</label>' +
+      '<input type="date" id="' + pre + 'when-date" data-when="' + nm + '" min="' + tmr + '" value="' + esc(date || '') + '" aria-label="' + tt('生效日期') + '"></div>' +
       '<p class="small muted" style="margin:0">' + tt('选以后的日子，修改会先排队，到那天凌晨 4:00 自动生效。') + '</p></fieldset>';
   }
-  function whenRaw() { const r = document.querySelector('input[name="when"]:checked'); return { sel: r ? r.value : 'now', date: ($('#when-date') || {}).value || '' }; }
+  function whenRaw(pre) { pre = pre || ''; const r = document.querySelector('input[name="' + pre + 'when"]:checked'); return { sel: r ? r.value : 'now', date: ($('#' + pre + 'when-date') || {}).value || '' }; }
   // 返回 { at: null }（立即）或 { at: '日期' }；日期不对时在 errEl 里提示并返回 null
-  function readWhen(errEl) {
-    const w = whenRaw();
+  function readWhen(errEl, pre) {
+    const w = whenRaw(pre);
     if (w.sel === 'now') return { at: null };
     if (w.sel === 'mon') return { at: L.nextWeekKey(Date.now()) };
     if (!w.date || w.date <= L.dayKey(Date.now())) { if (errEl) errEl.textContent = tt('请选一个明天或以后的日期。'); return null; }
     return { at: w.date };
   }
-  document.addEventListener('input', e => { if (e.target.id === 'when-date') { const r = document.querySelector('input[name="when"][value="date"]'); if (r) r.checked = true; } });
+  document.addEventListener('input', e => { const nm = e.target.dataset && e.target.dataset.when; if (nm) { const r = document.querySelector('input[name="' + nm + '"][value="date"]'); if (r) r.checked = true; } });
   const queued = (type, key, id) => (S.scheduled || []).filter(q => q.type === type && q.data[key] === id);
   function qDesc(q) {
     const d = q.data, tname = id => { const t = S.tasks.find(x => x.id === id); return t ? t.name : tt('已删除的任务'); };
     const spName = sp => sp.name || sp.items.map(i => i.name).join(tt('、'));
     const sname = gid => { const g = (S.specials || []).find(x => x.id === gid); return g ? spName(g) : tt('已删除的特别任务'); };
-    if (q.type === 'settings') return tt('修改奖励数值和奖池');
+    if (q.type === 'settings') return d.patch && d.patch.credit ? tt('修改借着玩与信用的规则') : tt('修改奖励数值和奖池');
     if (q.type === 'task-add') { const g = L.GROUPS.find(x => x.id === d.group); return tt('添加任务：') + d.name + (g ? tt('（') + tt(g.name).trim() + tt('）') : ''); }
     if (q.type === 'task-edit') return tt('修改任务：') + tname(d.id);
     if (q.type === 'task-del') return tt('删除任务：') + tname(d.id);
@@ -1225,15 +1226,46 @@
       h.slice(i + head.length, j) + '</div></details>' + h.slice(j + '</section>'.length);
   }
   // 借着玩与信用：只写现在的等级和规则，不显示分数（看到分数会紧张）
+  const CR_FIELDS = [
+    ['plusClear', '前一天没有欠账：加几分'], ['plusRepay', '欠着，但比前一天少了：加几分'], ['minusStuck', '欠着，而且没有变少：扣几分'],
+    ['deepMin', '欠超过多少分钟算「欠得深」'], ['minusDeep', '欠得深时再扣几分'], ['clearBonus', '把欠账全部还清的那天：再加几分'],
+    ['watchBelow', '低于多少分进入「注意」'], ['pauseBelow', '低于多少分「暂停借款」'], ['watchLimit', '「注意」时最多能欠多少分钟'], ['remindMin', '借着玩时每隔多少分钟提醒一次'],
+  ];
+  function crFill(c) {
+    CR_FIELDS.forEach(([k]) => { const e = $('#cr-' + k); if (e) e.value = c[k]; });
+    const b = $('#cr-borrow'), u = $('#cr-use'); if (b) b.checked = !!c.borrow; if (u) u.checked = !!c.useCredit;
+  }
+  // 借着玩与信用：只写现在的等级和规则，不显示分数（看到分数会紧张）；规则可以修改
   function creditSectionHtml() {
-    const tier = L.creditTier(L.ensureCredit(S).score);
-    const desc = { great: tt('还款记录很好，可以随时借着玩。'), good: tt('可以随时借着玩。'), watch: tt('还能借，但最多欠到 2 小时。'), paused: tt('欠着的时候暂时不能借，先还一部分就好。') }[tier];
-    return '<section class="sec"><h2>' + tt('借着玩与信用') + '</h2><p style="margin:0">' + tt('现在：') + '<b>' + creditName(S.credit.score) + '</b>' + tt('。') + desc + '</p>' +
-      '<p class="small muted" style="margin:0">' + tt('信用只看最近的还款情况：偶尔玩多了没关系，一直欠着、越欠越多才会变低。它只影响能不能借，不会扣你已经拿到的东西。') + '</p>' +
-      '<h3 style="font-size:15px;margin:4px 0 0">' + tt('每天凌晨 4:00 按前一天结束时的余额计算') + '</h3><ul class="small credlist">' +
-      '<li>' + tt('没有欠账：+3') + '</li><li>' + tt('欠着，但比前一天少了：+1') + '</li><li>' + tt('欠着，而且没有变少：−2') + '</li><li>' + tt('欠超过 3 小时：再 −2') + '</li><li>' + tt('把欠账全部还清的那天：再 +10') + '</li></ul>' +
+    const k = L.creditCfg(S), tier = L.creditTier(L.ensureCredit(S).score, k);
+    const desc = !k.borrow ? tt('现在不能借着玩：余额用完时不能开始游戏。') : !k.useCredit ? tt('现在不用信用限制，余额用完也能随时借着玩。') :
+      tt('现在：') + '<b>' + creditName(S.credit.score) + '</b>' + tt('。') + ({ great: tt('还款记录很好，可以随时借着玩。'), good: tt('可以随时借着玩。'), watch: tt('还能借，但最多欠到 #。').replace('#', fmtMin(k.watchLimit)), paused: tt('欠着的时候暂时不能借，先还一部分就好。') }[tier]);
+    const li = (zh, n) => '<li>' + tt(zh).replace('#', n) + '</li>';
+    let h = '<section class="sec"><h2>' + tt('借着玩与信用') + '</h2><p style="margin:0">' + desc + '</p>' +
+      '<p class="small muted" style="margin:0">' + tt('信用只看最近的还款情况：偶尔玩多了没关系，一直欠着、越欠越多才会变低。它只影响能不能借，不会扣你已经拿到的东西。') + '</p>';
+    if (k.borrow && k.useCredit) h += '<h3 style="font-size:15px;margin:4px 0 0">' + tt('每天凌晨 4:00 按前一天结束时的余额计算') + '</h3><ul class="small credlist">' +
+      li('没有欠账：+#', k.plusClear) + li('欠着，但比前一天少了：+#', k.plusRepay) + li('欠着，而且没有变少：−#', k.minusStuck) + '<li>' + tt('欠超过 #：再 −').replace('#', fmtMin(k.deepMin)) + k.minusDeep + '</li>' + li('把欠账全部还清的那天：再 +#', k.clearBonus) + '</ul>' +
       '<h3 style="font-size:15px;margin:4px 0 0">' + tt('等级') + '</h3><ul class="small credlist">' +
-      '<li>' + tt('80–100 优秀：随时可以借') + '</li><li>' + tt('50–79 良好：随时可以借') + '</li><li>' + tt('30–49 注意：最多欠到 2 小时') + '</li><li>' + tt('0–29 暂停借款：欠着时不能开始游戏，有余额时照常玩') + '</li></ul></section>';
+      '<li>' + tt('80 分以上：优秀，随时可以借') + '</li><li>' + tt('# 分以上：良好，随时可以借').replace('#', k.watchBelow) + '</li>' +
+      '<li>' + tt('# 分以上：注意，最多欠到 ').replace('#', k.pauseBelow) + fmtMin(k.watchLimit) + '</li><li>' + tt('# 分以下：暂停借款，欠着时不能开始游戏，有余额时照常玩').replace('#', k.pauseBelow) + '</li></ul>';
+    h += '<h3 style="font-size:15px;margin:8px 0 0">' + tt('修改规则') + '</h3><p class="small muted" style="margin:-6px 0 0">' + tt('想更严或更松，可以先点一个预设，再微调。') + '</p>' +
+      '<div class="row">' + [['loose', '宽松'], ['normal', '默认'], ['strict', '严格']].map(([p, l]) => '<button class="btn sm" data-act="cr-preset" data-p="' + p + '">' + tt(l) + '</button>').join('') + '</div>' +
+      '<label class="check"><input type="checkbox" id="cr-borrow"' + (k.borrow ? ' checked' : '') + '>' + tt('允许借着玩（余额用完也能开始游戏）') + '</label>' +
+      '<label class="check"><input type="checkbox" id="cr-use"' + (k.useCredit ? ' checked' : '') + '>' + tt('用信用限制借款（关掉就是随时都能借）') + '</label>' +
+      '<div class="setgroup">' + CR_FIELDS.map(([f, l]) => '<label class="setrow"><span>' + tt(l) + '</span><input type="number" inputmode="numeric" min="0" id="cr-' + f + '" value="' + k[f] + '"></label>').join('') + '</div>' +
+      whenHtml(null, null, 'cr') + '<p class="small" id="crerr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="save-credit">' + tt('保存信用规则') + '</button></div></section>';
+    return h;
+  }
+  function saveCredit() {
+    const err = $('#crerr'), c = { borrow: $('#cr-borrow').checked, useCredit: $('#cr-use').checked };
+    CR_FIELDS.forEach(([k]) => { const v = $('#cr-' + k).value; c[k] = v === '' ? NaN : Math.round(Number(v)); });
+    const e = L.creditError(c); if (e) { err.textContent = tt(e); return; }
+    const w = readWhen(err, 'cr'); if (!w) return;
+    if (!w.at && JSON.stringify(c) === JSON.stringify(L.creditCfg(S))) { toast(tt('数值和现在一样，没有需要修改的。')); return; }
+    const u = begin(tt('修改借着玩与信用的规则'));
+    if (!w.at) { S.settings = Object.assign({}, S.settings, { credit: c }); toast(tt('设置已保存，立刻生效。')); }
+    else { L.schedule(S, w.at, 'settings', { patch: { credit: c } }, Date.now()); toast(queuedNote(w.at)); }
+    S.undo = u; save(); renderMain();
   }
   function readSettings() {
     const s = clone(S.settings);
@@ -1461,7 +1493,7 @@
       });
     },
     'alarm-stop': () => { alarmClose(); stopTimer(); },
-    'alarm-snooze': () => { alarmClose(); toast(S.timer && S.timer.borrow ? tt('好，再玩 2 小时会再提醒一次。') : tt('好，超出 5 分钟时会再提醒一次。'), 5000); },
+    'alarm-snooze': () => { alarmClose(); toast(S.timer && S.timer.borrow ? tt('好，再玩 # 会再提醒一次。').replace('#', fmtMin(L.creditCfg(S).remindMin)) : tt('好，超出 5 分钟时会再提醒一次。'), 5000); },
     draw1: () => doDraw(1), drawall: () => doDraw(S.tickets),
     undo: askUndo, abandon: abandonTimer,
     'stat-mode': el => { stat.mode = el.dataset.m; stat.off = 0; renderMain(); },
@@ -1474,6 +1506,8 @@
     export: exportBackup,
     lang: el => { if (el.dataset.l !== window.LANG) window.setLang(el.dataset.l); },
     'gh-save': ghSave,
+    'save-credit': saveCredit,
+    'cr-preset': el => { crFill(L.CREDIT_PRESETS[el.dataset.p]); $('#crerr').textContent = tt('已填好，点「保存信用规则」后才会生效。'); },
     'gh-now': async () => { toast(tt('正在同步……')); ghLast = null; if (await ghPush()) toast(tt('已同步到 GitHub。')); },
     'gh-off': () => confirmBox(tt('关闭同步到 GitHub？'), tt('这台设备会忘掉令牌，之后不再上传。GitHub 上已经存的数据不会删除。'), tt('关闭同步'), () => { ghSetCfg(null); clearTimeout(ghTimer); ghSha = undefined; ghLast = null; closeModal(); toast(tt('已关闭同步。')); }),
     'm-close': closeModal,

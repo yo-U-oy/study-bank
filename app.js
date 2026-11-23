@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.16.3', APP_DATE = '2026-11-23'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.16.4', APP_DATE = '2026-11-23'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -480,10 +480,9 @@
       nextTip = tt('再学 ') + Math.max(1, Math.ceil((segSec - live % segSec) / 60)) + tt(' 分钟得 1 张抽奖券');
     }
     let h = banners();
-    if (S.undo) h += tt('<div class="note row spread small"><span class="grow">上一步：') + esc(S.undo.label) + tt('</span><button class="btn sm" data-act="undo">撤销</button></div>');
     h += runningHtml();
     if (false) h += '<button class="running' + (t.kind === 'play' ? ' play' : '') + '" data-act="ov-open"><span class="grow">' + (t.paused ? tt('已暂停：') : tt('正在计时：')) + esc(nm(t.name)) + '</span><span class="t" id="runT"></span></button>';
-    h += pageHead(tt('任务日志')) + buddyHtml();
+    h += buddyHtml(); // 学习页不放标题，让任务往上靠
     h += tt('<section class="dayline"><div class="row spread small"><span>今日经验 · 已学 <strong>') + Math.floor(live / 60) + tt('</strong> 分钟 · ') + head + '</span><span class="muted">' + nextTip + '</span></div><div class="segs">' + segs + '</div></section>';
 
     // 学习页分两页：日常任务（每日、每周、非必要）和特别任务。点上方切换，或在任务区左右滑动
@@ -1199,6 +1198,8 @@
   function viewSettings() {
     const cur = S.settings, nq = (S.scheduled || []).filter(q => q.type === 'settings').length;
     let h = pageHead(tt('设置')) +
+      // "上一步 / 撤销"放在设置页最上面（学习页不再显示）；做完操作时的提示气泡里也能撤销
+      (S.undo ? '<section class="sec"><h2>' + tt('上一步') + '</h2><div class="row spread"><span class="grow">' + esc(S.undo.label) + '</span><button class="btn sm" data-act="undo">' + tt('撤销') + '</button></div></section>' : '') +
       tt('<section class="sec"><h2>记录</h2><div class="row"><button class="btn" data-act="tab" data-tab="stats" data-back="settings">冒险记录（统计）</button><button class="btn" data-act="tab" data-tab="ledger" data-back="settings">全部流水</button></div></section>');
     h += queueHtml();
     h += tt('<section class="sec"><h2>奖励数值</h2><p class="small muted" style="margin:0">') + tt('下面是现在正在用的数值。保存时可以选择立即生效，或者排到以后的日子。') + (nq ? ' ' + tt('有 # 个数值修改在排队，见上面「准备生效的修改」。').replace('#', nq) : '') + '</p>' +

@@ -278,4 +278,5 @@ window.I18N_EN = {
   '宽松': 'Loose', '默认': 'Default', '严格': 'Strict',
   '有一项数值为空或为负数，请检查。': 'One of the values is empty or negative. Please check.', '「暂停借款」的分数要低于「注意」，「注意」最高 80。': 'The "Borrowing paused" score must be below "Watch", and "Watch" can be at most 80.', '提醒间隔至少 10 分钟。': 'The reminder interval must be at least 10 minutes.',
   '想借的话，可以在设置的「借着玩与信用」里打开。': 'If you want to borrow, turn it on under "Playing on credit" in Settings.',
+  '上一步': 'Last action',
 };

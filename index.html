@@ -324,6 +324,20 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 @keyframes slideok{0%{box-shadow:0 0 0 rgba(240,211,142,0)}40%{box-shadow:0 0 40px rgba(240,211,142,.8)}100%{box-shadow:0 0 0 rgba(240,211,142,0)}}
 @keyframes shine{from{background-position:100% 0}to{background-position:0 0}}
 .cheer .ctier.tA{color:var(--brass-hi);text-shadow:0 0 18px rgba(240,211,142,.6)}
+/* 统计：每天的变化 */
+.trend svg{width:100%;height:auto;display:block}
+.trend text{font-size:10px;fill:var(--muted);font-family:inherit}
+.trend .tmax{font-size:9px}
+.trend .tbase{stroke:var(--line);stroke-width:1}
+.trend .tb{fill:#6b5a3e}
+.trend .tb.today{fill:#8a7550}
+.trend .tb.hi{fill:#f0b44c}
+.trend .tavg{stroke:var(--text);stroke-width:1;stroke-dasharray:4 3;opacity:.7}
+.trend+p{margin:0}
+.sec .segctl.trendm,.sec .trendm+.segctl{display:flex;width:100%}
+.sec .trendm button,.sec .trendm+.segctl button{flex:1;padding:0 6px;font-size:13px}
+.sw.tswavg{background:none;border-top:2px dashed var(--text);height:0;width:14px;border-radius:0;vertical-align:middle;margin-right:4px;opacity:.7}
+.sw.tswhi{background:#f0b44c;margin-right:4px}
 /* 特别任务：筛选、收成一行的组、今天完成的 */
 .spfilter{display:flex;width:100%}
 .spfilter button{flex:1;padding:0 6px;min-height:36px;font-size:14px}

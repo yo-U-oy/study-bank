@@ -279,4 +279,10 @@ window.I18N_EN = {
   '有一项数值为空或为负数，请检查。': 'One of the values is empty or negative. Please check.', '「暂停借款」的分数要低于「注意」，「注意」最高 80。': 'The "Borrowing paused" score must be below "Watch", and "Watch" can be at most 80.', '提醒间隔至少 10 分钟。': 'The reminder interval must be at least 10 minutes.',
   '想借的话，可以在设置的「借着玩与信用」里打开。': 'If you want to borrow, turn it on under "Playing on credit" in Settings.',
   '上一步': 'Last action',
+  // 每天的变化
+  '每天的变化': 'Day by day', '游戏时间': 'Game time', '学习时间': 'Study time', '完成的任务': 'Tasks done', '# 天': '# days', '# 个': '#',
+  '（平时约 #）': ' (usually about #)', '平时约 #': 'usually about #', '点一根柱子可以看那天的数值。': 'Tap a bar to see that day.',
+  '虚线：这段时间的平均值（不算今天）': 'Dashed line: the average for this period (excluding today)', '，约 #': ', about #', '颜色亮的柱子：比平时明显多的日子。': 'Bright bars: days well above usual.',
+  '有 7 天以上的记录之后，才会标出明显多的日子。': 'Days well above usual are marked once there are 7 or more days of records.',
+  '完成的任务：当天完成的特别任务，加上计时达标的每日任务（按现在的任务设置估算）。': 'Tasks done: special tasks finished that day, plus daily tasks whose timed study reached the goal (estimated with current task settings).',
 };

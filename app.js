@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.16.4', APP_DATE = '2026-11-23'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.16.5', APP_DATE = '2026-11-23'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -12,7 +12,7 @@
   let view = 'today', overlayOpen = false, modal = null;
   let backTo = 'settings';
   const logView = () => view === 'ledger' || view === 'stats' || (view === 'draw' && !(lastDraw && lastDraw.rolling));
-  let stat = { mode: 'week', off: 0, moff: 0, tip: '' };
+  let stat = { mode: 'week', off: 0, moff: 0, tip: '', tm: 'play', td: 30, ttip: '' };
   let remind = { a: false, b: false, over: 0 }, AC = null;
   let todayPage = 'routine', pageAnim = '', spFilter = 'all', spOpen = new Set();
   try { spFilter = localStorage.getItem('bank-sp-filter') || 'all'; spOpen = new Set(JSON.parse(localStorage.getItem('bank-sp-open') || '[]')); } catch (e) { }
@@ -1122,6 +1122,51 @@
     const st = d.toISOString().slice(0, 10); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0);
     return { start: st, end: d.toISOString().slice(0, 10), label: st.slice(0, 7) };
   }
+  /* ---------- 每天的变化：只画图，不分析、不提醒 ---------- */
+  // 某一天的数值：游戏分钟 / 学习分钟 / 完成的任务数（特别任务、临时任务，加上计时达标的每日任务）
+  function dayMetric(k, metric) {
+    const d = logCache[k]; if (!d) return 0;
+    if (metric === 'play') return d.entries.reduce((a, e) => a + ((/^玩游戏 /.test(e.label) || e.label === '手动扣除游戏时间') && e.min < 0 ? -e.min : 0), 0);
+    if (metric === 'study') return Math.round(d.sessions.reduce((a, x) => a + (x.sec || 0), 0) / 60);
+    let n = d.entries.filter(e => /^特别任务：|^临时任务完成：/.test(e.label)).length;
+    const per = {}; d.sessions.forEach(x => { if (x.taskId) per[x.taskId] = (per[x.taskId] || 0) + (x.sec || 0); });
+    S.tasks.forEach(t => { if (t.group === 'daily' && !t.manual && per[t.id] >= t.threshold * 60) n++; });
+    return n;
+  }
+  const trendFmt = (v, metric) => metric === 'done' ? tt('# 个').replace('#', v) : fmtMin(Math.round(v));
+  function trendHtml(T) {
+    const n = stat.td, metric = stat.tm, first = (ledgerKeys || []).reduce((a, k) => (k < a ? k : a), T);
+    const days = []; for (let i = n - 1; i >= 0; i--) { const k = kadd(T, -i); days.push({ k, v: k < first ? null : dayMetric(k, metric) }); }
+    // 平均值只算已经过完的、有记录以来的日子（今天还没过完，不算进去）
+    const base = days.filter(x => x.v !== null && x.k < T).map(x => x.v), mean = base.length ? base.reduce((a, b) => a + b, 0) / base.length : 0;
+    const sd = base.length ? Math.sqrt(base.reduce((a, b) => a + (b - mean) * (b - mean), 0) / base.length) : 0, enough = base.length >= 7;
+    // "明显多"：比平均值高出两个标准差以上，而且至少是平均值的 1.5 倍
+    const high = x => enough && x.v !== null && x.v > 0 && x.v >= mean + 2 * sd && x.v >= mean * 1.5;
+    const W = 336, H = 132, top = 14, bottom = 104, step = W / n, bw = Math.max(2, Math.min(14, step * 0.7));
+    const maxV = Math.max(1, mean * 1.3, ...days.map(x => x.v || 0)), y = v => bottom - (v / maxV) * (bottom - top);
+    let bars = '';
+    days.forEach((x, i) => {
+      if (x.v === null) return;
+      const hgt = x.v ? Math.max(2, bottom - y(x.v)) : 0, bx = i * step + (step - bw) / 2;
+      const tip = mdLabel(x.k) + tt('：') + trendFmt(x.v, metric) + (base.length ? tt('（平时约 #）').replace('#', trendFmt(mean, metric)) : '');
+      bars += '<rect class="tb' + (high(x) ? ' hi' : '') + (x.k === T ? ' today' : '') + '" x="' + bx.toFixed(1) + '" y="' + (bottom - hgt).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(hgt, 0).toFixed(1) + '" rx="1.5"><title>' + esc(tip) + '</title></rect>' +
+        '<rect x="' + (i * step).toFixed(1) + '" y="0" width="' + step.toFixed(1) + '" height="' + bottom + '" fill="transparent" data-act="trend-tip" data-tip="' + esc(tip) + '"/>';
+    });
+    const lbl = [0, Math.floor((n - 1) / 2), n - 1].map(i => '<text x="' + (i * step + step / 2).toFixed(1) + '" y="' + (bottom + 16) + '" text-anchor="' + (i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle') + '">' + (days[i].k === T ? tt('今天') : mdLabel(days[i].k)) + '</text>').join('');
+    const avg = base.length ? '<line class="tavg" x1="0" x2="' + W + '" y1="' + y(mean).toFixed(1) + '" y2="' + y(mean).toFixed(1) + '"/>' : '';
+    const his = days.filter(high);
+    let h = '<section class="sec"><h2>' + tt('每天的变化') + '</h2>' +
+      '<div class="segctl trendm">' + [['play', '游戏时间'], ['study', '学习时间'], ['done', '完成的任务']].map(([k, l]) => '<button data-act="trend-m" data-m="' + k + '" aria-pressed="' + (metric === k) + '">' + tt(l) + '</button>').join('') + '</div>' +
+      '<div class="segctl">' + [14, 30, 90].map(d => '<button data-act="trend-d" data-d="' + d + '" aria-pressed="' + (n === d) + '">' + tt('# 天').replace('#', d) + '</button>').join('') + '</div>' +
+      '<div class="trend"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + tt('每天的变化') + '"><line class="tbase" x1="0" x2="' + W + '" y1="' + (bottom + 0.5) + '" y2="' + (bottom + 0.5) + '"/>' + bars + avg + lbl +
+      '<text x="0" y="10" class="tmax">' + trendFmt(maxV, metric) + '</text></svg></div>' +
+      '<p class="small muted" id="trendtip" style="margin:0">' + (stat.ttip || tt('点一根柱子可以看那天的数值。')) + '</p>' +
+      '<p class="small muted" style="margin:0"><i class="sw tswavg"></i>' + tt('虚线：这段时间的平均值（不算今天）') + (base.length ? tt('，约 #').replace('#', trendFmt(mean, metric)) : '') + tt('。') + ' <i class="sw tswhi"></i>' + tt('颜色亮的柱子：比平时明显多的日子。') + '</p>';
+    if (!enough) h += '<p class="small muted" style="margin:0">' + tt('有 7 天以上的记录之后，才会标出明显多的日子。') + '</p>';
+    else if (his.length) h += '<div class="small">' + his.map(x => '<div class="lrow"><i class="sw tswhi"></i><span class="grow">' + mdLabel(x.k) + '</span><span class="num">' + trendFmt(x.v, metric) + '</span><span class="muted num">' + tt('平时约 #').replace('#', trendFmt(mean, metric)) + '</span></div>').join('') + '</div>';
+    if (metric === 'done') h += '<p class="small muted" style="margin:0">' + tt('完成的任务：当天完成的特别任务，加上计时达标的每日任务（按现在的任务设置估算）。') + '</p>';
+    return h + '</section>';
+  }
   const tile = (label, value) => '<div><span>' + label + '</span><b class="num">' + value + '</b></div>';
   function viewStats() {
     if (!ledgerKeys) return tt('<div class="center"><p class="muted">正在读取学习记录</p></div>');
@@ -1133,6 +1178,7 @@
     const today = all.filter(x => x.day === T);
     h += tt('<section class="sec"><h2>累计专注</h2><div class="tiles">') + tile(tt('次数'), all.length) + tile(tt('时长'), mins(sum(all))) + tile(tt('日均时长'), mins(sum(all) / days)) + '</div></section>';
     h += tt('<section class="sec"><h2>今日专注</h2><div class="tiles two">') + tile(tt('次数'), today.length) + tile(tt('时长'), mins(sum(today))) + '</div></section>';
+    h += trendHtml(T);
 
     // 时长分布：细分段条 + 带色块的列表
     const r = statRange(T), inR = all.filter(x => x.day >= r.start && x.day <= r.end), by = {};
@@ -1500,6 +1546,9 @@
     'stat-mode': el => { stat.mode = el.dataset.m; stat.off = 0; renderMain(); },
     'stat-nav': el => { stat.off = Math.min(0, stat.off + Number(el.dataset.d)); renderMain(); },
     'stat-mnav': el => { stat.moff = Math.min(0, stat.moff + Number(el.dataset.d)); stat.tip = ''; renderMain(); },
+    'trend-m': el => { stat.tm = el.dataset.m; stat.ttip = ''; renderMain(); },
+    'trend-d': el => { stat.td = Number(el.dataset.d); stat.ttip = ''; renderMain(); },
+    'trend-tip': el => { stat.ttip = el.dataset.tip; const t = $('#trendtip'); if (t) t.textContent = stat.ttip; },
     'stat-tip': el => { stat.tip = el.dataset.tip; const t = $('#stattip'); if (t) t.textContent = stat.tip; },
     'save-settings': saveSettings,
     'reset-settings': () => { const d = L.defaultSettings(); FIELDS.forEach(f => { $('#set-' + f[0]).value = d[f[0]]; }); d.pool.forEach((p, i) => { $('#pool-p-' + i).value = p.p; $('#pool-m-' + i).value = p.m; }); $('#seterr').textContent = tt('已填回默认值，点保存设置后才会生效。'); },

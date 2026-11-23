@@ -1,6 +1,6 @@
 /* 学习抽卡银行：页面与云端保存 */
 (function () {
-  const APP_VERSION = '1.16.1', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
+  const APP_VERSION = '1.16.2', APP_DATE = '2026-11-20'; // 每次发布都要改这里，并同步 sw.js 里的 VERSION
   const L = window.Logic;
   const $ = s => document.querySelector(s);
   const main = $('#main'), tabs = $('#tabs'), layer = $('#layer'), toasts = $('#toasts');
@@ -8,9 +8,8 @@
   const clone = o => JSON.parse(JSON.stringify(o));
   const pad = n => String(n).padStart(2, '0');
 
-  let S = null, phase = 'loading', cloud = false, stateRef = null, downloads = null;
+  let S = null, phase = 'loading';
   let view = 'today', overlayOpen = false, modal = null;
-  let dirty = false, inflight = false, saveErr = false, confirmed = false;
   let backTo = 'settings';
   const logView = () => view === 'ledger' || view === 'stats' || (view === 'draw' && !(lastDraw && lastDraw.rolling));
   let stat = { mode: 'week', off: 0, moff: 0, tip: '' };
@@ -107,33 +106,21 @@
 
   /* ---------- 保存 ---------- */
   function save() {
-    if (!cloud) { try { localStorage.setItem('bank-local-state', JSON.stringify(S)); } catch (e) { } ghSchedule(); return; }
-    if (!confirmed) return;
-    dirty = true; if (!inflight) flush();
+    try { localStorage.setItem('bank-local-state', JSON.stringify(S)); } catch (e) { }
+    ghSchedule();
   }
-  async function flush() {
-    inflight = true;
-    while (dirty) {
-      dirty = false;
-      try { await stateRef.set(clone(S)); saveErr = false; }
-      catch (e) { saveErr = true; break; }
-    }
-    inflight = false;
-    if (saveErr) renderMain();
-  }
-  function logRef(k) { return stateRef.collection('logs').doc(k); }
   function localLogs() { try { return JSON.parse(localStorage.getItem('bank-local-logs')) || {}; } catch (e) { return {}; } }
   async function loadLog(k) {
     if (logCache[k]) return logCache[k];
     let d = null;
-    if (cloud) { const s = await logRef(k).get(); if (s.exists) d = clone(s.data()); }
-    else d = localLogs()[k] || null;
+    d = localLogs()[k] || null;
     d = d || {}; d.entries = d.entries || []; d.sessions = d.sessions || [];
     logCache[k] = d; return d;
   }
   async function writeLog(k) {
-    if (cloud) await logRef(k).set(clone(logCache[k]));
-    else { const all = localLogs(); all[k] = logCache[k]; try { localStorage.setItem('bank-local-logs', JSON.stringify(all)); } catch (e) { } ghSchedule(); }
+    const all = localLogs(); all[k] = logCache[k];
+    try { localStorage.setItem('bank-local-logs', JSON.stringify(all)); } catch (e) { }
+    ghSchedule();
   }
   /* ---------- 同步到 GitHub（只在独立版）：把数据存一份到作者自己的私有仓库，方便备份和让 AI 读取 ---------- */
   // 设置存在 localStorage 的 bank-gh-sync 里（不放进 state，所以不会进导出的备份）
@@ -149,7 +136,7 @@
   function ghSetCfg(c) { try { if (c) localStorage.setItem(GH_KEY, JSON.stringify(c)); else localStorage.removeItem(GH_KEY); } catch (e) { } }
   function ghNote(patch) { const c = ghCfg(); if (!c) return; ghSetCfg(Object.assign(c, patch)); if (view === 'settings' && !modal) renderMain(); }
   function ghSchedule(ms) {
-    if (cloud || !ghCfg()) return;
+    if (!ghCfg()) return;
     clearTimeout(ghTimer); ghTimer = setTimeout(() => { ghTimer = null; ghPush(); }, ms == null ? 30000 : ms);
   }
   function ghReq(c, method, body) {
@@ -177,7 +164,7 @@
   }
   // 上传一次；返回 true 表示成功（或内容没变不需要上传）
   async function ghPush(cfgOverride) {
-    const c = cfgOverride || ghCfg(); if (cloud || !c || !S) return false;
+    const c = cfgOverride || ghCfg(); if (!c || !S) return false;
     if (ghBusy) { ghAgain = true; return false; }
     ghBusy = true; let ok = false;
     try {
@@ -204,7 +191,6 @@
     return ok;
   }
   function ghSettingsHtml() {
-    if (cloud) return '';
     const c = ghCfg();
     let h = tt('<section class="sec"><h2>同步到 GitHub</h2><p class="small muted" style="margin:0">把数据自动存一份到你自己的私有 GitHub 仓库：多一份自动备份，也方便让 AI 帮你看流水。记账后大约半分钟自动上传。令牌只保存在这台设备里，不会放进导出的备份。</p>');
     if (c) {
@@ -246,39 +232,8 @@
   }
 
   /* ---------- 启动 ---------- */
-  async function boot() {
-    const timer = setTimeout(() => {
-      const el = $('#bootmsg'); if (phase === 'loading' && el) el.textContent = tt('暂时连不上云端数据。网络恢复后会自动继续，不需要刷新。');
-    }, 10000);
-    let db = null, user = null;
-    try {
-      if (window.claude && window.claude.use) [db, user, downloads] = await Promise.all([window.claude.use('db'), window.claude.use('user'), window.claude.use('downloads')]);
-    } catch (e) { }
-    let uid = null; try { uid = user ? await user.id() : null; } catch (e) { }
-    if (!db || !uid) { clearTimeout(timer); startLocal(); return; }
-    cloud = true; stateRef = db.doc('data/users/' + uid + '/state');
-    stateRef.onSnapshot(snap => {
-      if (!snap.exists) {
-        if (!snap.metadata.fromCache && phase === 'loading') { clearTimeout(timer); phase = 'onboard'; render(); }
-        return;
-      }
-      // 浏览器里留着的旧副本不能当真：等云端给出确认过的数据再显示和保存，否则旧数据会把新数据盖掉
-      if (snap.metadata.fromCache && !confirmed) return;
-      if (!snap.metadata.fromCache) { clearTimeout(timer); confirmed = true; }
-      if (dirty || inflight) return;
-      const hadTimer = !!(S && S.timer);
-      S = clone(snap.data()); phase = 'ready';
-      if (L.migrate(S)) save();
-      if (S.timer && !hadTimer) overlayOpen = true;
-      checkRollover(Date.now());
-      render();
-    }, () => {
-      clearTimeout(timer);
-      if (phase === 'loading') { phase = 'error'; render(); } else { saveErr = true; renderMain(); }
-    });
-  }
+  function boot() { startLocal(); }
   function startLocal() {
-    cloud = false;
     try { S = JSON.parse(localStorage.getItem('bank-local-state')); } catch (e) { S = null; }
     phase = S ? 'ready' : 'onboard';
     if (S) { if (L.migrate(S)) save(); if (S.timer) overlayOpen = true; checkRollover(Date.now()); ghSchedule(5000); }
@@ -417,7 +372,7 @@
   // 学习途中达到奖励条件时，由开始计时的那台设备当场发奖
   function tryCheckpoint(now) {
     const t = S.timer;
-    if (!t || t.kind !== 'study' || t.paused || t.device !== DEVICE || dirty || inflight) return;
+    if (!t || t.kind !== 'study' || t.paused || t.device !== DEVICE) return;
     const el = L.elapsedSec(t, now), m = Math.floor(el / 60);
     if (m === lastCheckMin || el - t.committed < 60) return;
     lastCheckMin = m;
@@ -486,7 +441,6 @@
   /* ---------- 页面：今天 ---------- */
   function banners() {
     let h = '';
-    if (saveErr) h += tt('<div class="note warn row spread"><span>刚才的修改还没保存到云端。</span><button class="btn sm" data-act="retry">重试保存</button></div>');
     return h;
   }
   function bankHtml() {
@@ -1118,10 +1072,7 @@
     logChain = logChain.then(async () => {
       if (!ledgerKeys) {
         let keys = [];
-        if (cloud) {
-          const q = await stateRef.collection('logs').get();
-          q.docs.forEach(d => { const b = clone(d.data()); b.entries = b.entries || []; b.sessions = b.sessions || []; if (!logCache[d.id]) logCache[d.id] = b; keys.push(d.id); });
-        } else { const all = localLogs(); keys = Object.keys(all); for (const k of keys) await loadLog(k); }
+        const all = localLogs(); keys = Object.keys(all); for (const k of keys) await loadLog(k);
         if (!keys.includes(today)) keys.push(today);
         ledgerKeys = keys.sort().reverse();
       }
@@ -1254,12 +1205,12 @@
     h += tt('<section class="sec"><h2>奖池</h2><div class="inline small muted"><span>稀有度</span><span>概率 %</span><span>分钟</span></div>') +
       cur.pool.map((p, i) => '<div class="inline"><b class="t' + p.k + '" style="font-family:var(--display)">' + rName(p.k) + '</b><input type="number" inputmode="decimal" min="0" step="any" id="pool-p-' + i + '" value="' + p.p + '" aria-label="' + p.k + tt(' 赏概率"><input type="number" inputmode="decimal" min="0" step="any" id="pool-m-') + i + '" value="' + p.m + '" aria-label="' + p.k + tt(' 赏分钟"></div>')).join('') +
       whenHtml() + tt('<p class="small" id="seterr" style="margin:0;color:var(--warn)"></p><div class="row"><button class="btn primary" data-act="save-settings">保存设置</button><button class="btn ghost" data-act="reset-settings">填回默认值</button></div></section>');
-    h += tt('<section class="sec"><h2>备份</h2><p class="small muted" style="margin:0">') + (cloud ? tt('数据保存在云端，多台设备会自动同步。') : tt('数据只保存在这台设备的这个浏览器里，换设备或清除 Safari 数据会丢失。')) + tt('建议每周导出一次备份，存到“文件”App 或 iCloud，需要时再导入恢复。</p><div class="row">') +
+    h += tt('<section class="sec"><h2>备份</h2><p class="small muted" style="margin:0">') + tt('数据只保存在这台设备的这个浏览器里，换设备或清除 Safari 数据会丢失。') + tt('建议每周导出一次备份，存到“文件”App 或 iCloud，需要时再导入恢复。</p><div class="row">') +
       tt('<button class="btn" data-act="export">导出备份</button><label class="btn" for="importfile" tabindex="0">导入备份</label><input type="file" id="importfile" accept=".json,application/json" hidden></div></section>');
     h += langHtml();
     h += ghSettingsHtml();
     h += creditSectionHtml();
-    h += tt('<section class="sec"><h2>关于</h2><p style="margin:0"><b class="num" style="color:var(--brass-hi)">版本 ') + APP_VERSION + '</b> <span class="small muted">· ' + (cloud ? tt('Claude 版') : tt('独立版')) + ' · ' + APP_DATE + tt('</span></p><p class="small muted" style="margin:0">本页为免费的非官方同人作品，与 Larian Studios、Wizards of the Coast 无关，未经其批准或认可。同伴角色及其名称属于《博德之门 3》，版权归 Larian Studios 及 Wizards of the Coast 所有。</p>') +
+    h += tt('<section class="sec"><h2>关于</h2><p style="margin:0"><b class="num" style="color:var(--brass-hi)">版本 ') + APP_VERSION + '</b> <span class="small muted">· ' + tt('独立版') + ' · ' + APP_DATE + tt('</span></p><p class="small muted" style="margin:0">本页为免费的非官方同人作品，与 Larian Studios、Wizards of the Coast 无关，未经其批准或认可。同伴角色及其名称属于《博德之门 3》，版权归 Larian Studios 及 Wizards of the Coast 所有。</p>') +
       tt('<p class="small muted" style="margin:0" lang="en">学习抽卡银行 (Study Gacha Bank) is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. &copy;Wizards of the Coast LLC. Baldur&#39;s Gate 3 characters &copy; Larian Studios. This is free, non-commercial fan content and is not affiliated with Larian Studios.</p></section>');
     // 比较大的板块做成可以折叠（默认收起，记住打开过的）
     [['奖励数值', 'values'], ['奖池', 'pool'], ['备份', 'backup'], ['同步到 GitHub', 'gh'], ['借着玩与信用', 'credit'], ['关于', 'about']].forEach(([title, key]) => { h = foldSection(h, tt(title), key); });
@@ -1303,14 +1254,10 @@
   async function exportBackup() {
     let logs = {};
     try {
-      if (cloud) { const q = await stateRef.collection('logs').get(); q.docs.forEach(d => { logs[d.id] = d.data(); }); }
-      else logs = localLogs();
+      logs = localLogs();
     } catch (e) { toast(tt('读取流水失败，备份里只包含当前余额和任务。')); }
     const data = JSON.stringify({ app: 'study-gacha-bank', v: 1, exported: new Date().toISOString(), state: S, logs }, null, 1);
     const filename = 'study-bank-backup-' + L.dayKey(Date.now()) + '.json';
-    if (downloads) {
-      try { await downloads.save({ filename, data }); toast(tt('备份已交给浏览器保存。')); return; } catch (e) { }
-    }
     modal = { type: 'copy', data }; renderLayer();
   }
   function importBackup(file) {
@@ -1408,7 +1355,7 @@
     const st = L.initialState(Date.now());
     return tt('<div class="center" style="align-items:stretch;text-align:left;max-width:520px;margin:0 auto"><h1 style="font-size:30px;color:var(--brass-hi)">学习抽卡银行</h1>') +
       tt('<p style="margin:0">学习换游戏时间和抽奖券。只有奖励，没有惩罚：已经拿到的时间不会过期，也不会被扣掉。</p>') +
-      (cloud ? '' : tt('<div class="note">数据会保存在这台设备的浏览器里。已有备份的话，开始后到“设置”导入即可。</div>')) +
+      tt('<div class="note">数据会保存在这台设备的浏览器里。已有备份的话，开始后到“设置”导入即可。</div>') +
       tt('<section class="sec"><h2>会先放进这些任务</h2>') + L.GROUPS.map(g => '<div class="small"><span class="muted">' + tt(g.name) + tt('：</span>') + st.tasks.filter(x => x.group === g.id).map(x => esc(tt(x.name))).join(tt('、')) + '</div>').join('') +
       tt('<p class="small muted" style="margin:0">任务之后都可以改。第一天的修改立刻生效。</p></section>') +
       tt('<button class="btn primary" data-act="create">开始使用，领取 55 分钟测试礼包</button>') + langHtml() + '</div>';
@@ -1417,7 +1364,6 @@
     const top = main.scrollTop;
     tabs.hidden = phase !== 'ready';
     if (phase === 'loading') return;
-    if (phase === 'error') { main.innerHTML = tt('<div class="center"><h1>读取不到数据</h1><p class="muted">请检查网络并确认已经登录，然后重新打开这个页面。你的数据仍然保存在云端。</p></div>'); return; }
     if (phase === 'onboard') { main.innerHTML = viewOnboard(); return; }
     main.innerHTML = ttPlural(view === 'draw' ? viewDraw() : view === 'stats' ? viewStats() : view === 'ledger' ? viewLedger() : view === 'settings' ? viewSettings() : viewToday());
     const cur = view === 'stats' || view === 'ledger' ? backTo : view;
@@ -1445,14 +1391,8 @@
   /* ---------- 事件 ---------- */
   const ACT = {
     tab: el => { if (el.dataset.back) backTo = el.dataset.back; setView(el.dataset.tab); },
-    retry: () => { saveErr = false; save(); renderMain(); },
-    create: async () => {
-      // 新建之前再确认一次云端确实没有数据，避免把已有的余额盖掉
-      if (cloud) {
-        try { const snap = await stateRef.get(); if (snap.exists) { S = clone(snap.data()); confirmed = true; if (L.migrate(S)) save(); phase = 'ready'; checkRollover(Date.now()); render(); toast(tt('找到了你已有的数据，已经直接读取。')); return; } }
-        catch (e) { toast(tt('暂时连不上云端，请稍后再点一次。')); return; }
-      }
-      S = localizeDefaults(L.initialState(Date.now())); phase = 'ready'; confirmed = true; save(); logAppend([{ label: '测试礼包', min: 55, tix: 0 }]); render(); toast(tt('银行开好了，里面有 55 分钟。')); },
+    create: () => {
+      S = localizeDefaults(L.initialState(Date.now())); phase = 'ready'; save(); logAppend([{ label: '测试礼包', min: 55, tix: 0 }]); render(); toast(tt('银行开好了，里面有 55 分钟。')); },
     play: () => startTimer('play'),
     free: () => startTimer('study', null),
     start: el => startTimer('study', S.tasks.find(x => x.id === el.dataset.id)),

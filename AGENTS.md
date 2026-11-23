@@ -35,7 +35,7 @@
 - 网址：GitHub Pages，`https://yo-u-oy.github.io/study-bank/`，作者用手机"添加到主屏幕"当 App 用（PWA）。
 - 数据存在浏览器的 `localStorage`（键：`bank-local-state`、`bank-local-logs`），只在那台设备里。
 - **同步到 GitHub（1.7.0 起，只上传）**：设置里填入作者自己的私有仓库和令牌（fine-grained token，只给那一个仓库的 Contents 读写权限）后，记账约 30 秒后把 `{app, v, exported, state, logs}`（与导出备份同格式）上传为仓库里的 `data.json`，每次上传是一个提交。配置存在 localStorage 的 `bank-gh-sync`，不进 state、不进备份。AI 要看作者的流水、做统计时，读那个私有仓库的 `data.json`（仓库名问作者，不要写进这个公开仓库）。
-- 历史：项目最早在 Claude artifact 里开发，1.8.0 后迁出成为现在的独立网页。`app.js` 里还留着当时的云端分支（变量 `cloud`、`window.claude`、`confirmed` 保护），独立版不会走到那里；以后整理代码时可以删掉。
+- 历史：项目最早在 Claude artifact 里开发，1.8.0 后迁出成为现在的独立网页；当时的云端存储代码已在 1.16.2 删除。
 
 ## 3.4 设置页
 
